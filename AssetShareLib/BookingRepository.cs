@@ -30,6 +30,12 @@ namespace AssetShareLib
 
         public Booking Create(int rentedByUserId, int bookedMachineId, DateTime period)
         {
+            bool conflict = _bookings.Any(b => b.BookedMachineId == bookedMachineId && b.Period == period);
+            if (conflict)
+            {
+                throw new InvalidOperationException("The machine is already booked for the specified period.");
+            }
+
             var booking = new Booking
             {
                 Id = _nextId++,

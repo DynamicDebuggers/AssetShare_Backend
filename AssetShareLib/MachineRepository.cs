@@ -5,52 +5,58 @@ using AssetShareLib;
 
 public class MachineRepository
 {
-    private List<Machine> machines;
+    private List<Machine> _machines = new List<Machine>();
+    private int _nextId = 1;
 
     public MachineRepository()
     {
-        machines = new List<Machine>
-        {
-            new Machine { Id = 1, UserId = 1, Title = "Excavator", Description = "Large construction excavator", Price = 1500, Location = "Hvidovre" },
-            new Machine { Id = 2, UserId = 1, Title = "Mini Loader", Description = "Compact loader for small tasks", Price = 900, Location = "Hedehusene" },
-            new Machine { Id = 3, UserId = 2, Title = "Chainsaw", Description = "Professional chainsaw", Price = 200, Location = "Roskilde" },
-            new Machine { Id = 4, UserId = 3, Title = "Tractor", Description = "Farm tractor, good condition", Price = 1200, Location = "Vejle" },
-            new Machine { Id = 5, UserId = 2, Title = "Cement Mixer", Description = "Heavy-duty cement mixer", Price = 500, Location = "Horsens" }
-        };
+        _machines.Add(new Machine { UserId = 1, Title = "Excavator", Description = "Large construction excavator", Price = 1500, Location = "Hvidovre" });
+        _machines.Add(new Machine { UserId = 1, Title = "Mini Loader", Description = "Compact loader for small tasks", Price = 900, Location = "Hedehusene" });
+        _machines.Add(new Machine { UserId = 2, Title = "Chainsaw", Description = "Professional chainsaw", Price = 200, Location = "Roskilde" });
+        _machines.Add(new Machine { UserId = 3, Title = "Tractor", Description = "Farm tractor, good condition", Price = 1200, Location = "Vejle" });
+        _machines.Add(new Machine { UserId = 2, Title = "Cement Mixer", Description = "Heavy-duty cement mixer", Price = 500, Location = "Horsens" });
     }
 
-    public List<Machine> Get()
+    public IReadOnlyList<Machine> GetAll()
     {
-        return machines.Select(m => new Machine(m)).ToList();
+        return _machines.AsReadOnly();
     }
 
     public Machine? GetById(int id)
     {
-        Machine? found = machines.FirstOrDefault(m => m.Id == id);
-        return found == null ? null : new Machine(found);
+        Machine? machine = _machines.FirstOrDefault(m => m.Id == id);
+        if (machine == null)
+        {
+            return null;
+        }
+        return machine;
     }
 
     public Machine Add(Machine machine)
     {
-        int newId = machines.Any() ? machines.Max(m => m.Id) + 1 : 1;
-        machine.Id = newId;
-        machines.Add(machine);
+        if (machine == null)
+            throw new ArgumentNullException(nameof(machine));
+
+        machine.ValidateAll();
+        machine.Id = _nextId++;
+        _machines.Add(machine);
         return machine;
     }
 
-    public Machine? Remove(int id)
+
+public Machine? Remove(int id)
     {
-        Machine? machineToRemove = machines.FirstOrDefault(m => m.Id == id);
+        Machine? machineToRemove = _machines.FirstOrDefault(m => m.Id == id);
         if (machineToRemove != null)
         {
-            machines.Remove(machineToRemove);
+            _machines.Remove(machineToRemove);
         }
         return machineToRemove;
     }
 
     public Machine? Update(int id, Machine values)
     {
-        Machine? machineToUpdate = machines.FirstOrDefault(m => m.Id == id);
+        Machine? machineToUpdate = _machines.FirstOrDefault(m => m.Id == id);
         if (machineToUpdate != null)
         {
             machineToUpdate.Title = values.Title;
