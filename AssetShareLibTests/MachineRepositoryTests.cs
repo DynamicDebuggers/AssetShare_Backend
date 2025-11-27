@@ -24,7 +24,7 @@ namespace AssetShareLib.Tests
         [TestMethod]
         public void GetTest()
         {
-            var machines = repo.Get();
+            var machines = repo.GetAll();
 
             Assert.IsNotNull(machines);
             Assert.AreEqual(5, machines.Count);

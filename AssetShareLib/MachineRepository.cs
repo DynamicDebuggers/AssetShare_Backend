@@ -5,16 +5,55 @@ using AssetShareLib;
 
 public class MachineRepository
 {
-    private List<Machine> _machines = new List<Machine>();
+    private readonly List<Machine> _machines = new List<Machine>();
     private int _nextId = 1;
 
     public MachineRepository()
     {
-        _machines.Add(new Machine { UserId = 1, Title = "Excavator", Description = "Large construction excavator", Price = 1500, Location = "Hvidovre" });
-        _machines.Add(new Machine { UserId = 1, Title = "Mini Loader", Description = "Compact loader for small tasks", Price = 900, Location = "Hedehusene" });
-        _machines.Add(new Machine { UserId = 2, Title = "Chainsaw", Description = "Professional chainsaw", Price = 200, Location = "Roskilde" });
-        _machines.Add(new Machine { UserId = 3, Title = "Tractor", Description = "Farm tractor, good condition", Price = 1200, Location = "Vejle" });
-        _machines.Add(new Machine { UserId = 2, Title = "Cement Mixer", Description = "Heavy-duty cement mixer", Price = 500, Location = "Horsens" });
+        Add(new Machine
+        {
+            UserId = 1,
+            Title = "Excavator",
+            Description = "Large construction excavator",
+            Price = 1500,
+            Location = "Hvidovre"
+        });
+
+        Add(new Machine
+        {
+            UserId = 1,
+            Title = "Mini Loader",
+            Description = "Compact loader for small tasks",
+            Price = 900,
+            Location = "Hedehusene"
+        });
+
+        Add(new Machine
+        {
+            UserId = 2,
+            Title = "Chainsaw",
+            Description = "Professional chainsaw",
+            Price = 200,
+            Location = "Roskilde"
+        });
+
+        Add(new Machine
+        {
+            UserId = 3,
+            Title = "Tractor",
+            Description = "Farm tractor, good condition",
+            Price = 1200,
+            Location = "Vejle"
+        });
+
+        Add(new Machine
+        {
+            UserId = 2,
+            Title = "Cement Mixer",
+            Description = "Heavy-duty cement mixer",
+            Price = 500,
+            Location = "Horsens"
+        });
     }
 
     public IReadOnlyList<Machine> GetAll()
@@ -24,12 +63,7 @@ public class MachineRepository
 
     public Machine? GetById(int id)
     {
-        Machine? machine = _machines.FirstOrDefault(m => m.Id == id);
-        if (machine == null)
-        {
-            return null;
-        }
-        return machine;
+        return _machines.FirstOrDefault(m => m.Id == id);
     }
 
     public Machine Add(Machine machine)
@@ -38,15 +72,16 @@ public class MachineRepository
             throw new ArgumentNullException(nameof(machine));
 
         machine.ValidateAll();
+
         machine.Id = _nextId++;
         _machines.Add(machine);
+
         return machine;
     }
 
-
-public Machine? Remove(int id)
+    public Machine? Remove(int id)
     {
-        Machine? machineToRemove = _machines.FirstOrDefault(m => m.Id == id);
+        var machineToRemove = _machines.FirstOrDefault(m => m.Id == id);
         if (machineToRemove != null)
         {
             _machines.Remove(machineToRemove);
@@ -56,7 +91,7 @@ public Machine? Remove(int id)
 
     public Machine? Update(int id, Machine values)
     {
-        Machine? machineToUpdate = _machines.FirstOrDefault(m => m.Id == id);
+        var machineToUpdate = _machines.FirstOrDefault(m => m.Id == id);
         if (machineToUpdate != null)
         {
             machineToUpdate.Title = values.Title;
