@@ -10,13 +10,12 @@ public class MongoDbContext
     public MongoDbContext(IOptions<MongoDbSettings> options)
     {
         var settings = options.Value;
-
         var client = new MongoClient(settings.ConnectionString);
         _database = client.GetDatabase(settings.DatabaseName);
     }
 
-    public IMongoCollection<User> Users
-        => _database.GetCollection<User>("Users");
-
-    // Senere kan du tilføje Machines, Listings, Bookings osv.
+    public IMongoCollection<User> Users => _database.GetCollection<User>("Users");
+    public IMongoCollection<Machine> Machines => _database.GetCollection<Machine>("Machines");
+    public IMongoCollection<Listing> Listings => _database.GetCollection<Listing>("Listings");
+    public IMongoCollection<Booking> Bookings => _database.GetCollection<Booking>("Bookings");
 }

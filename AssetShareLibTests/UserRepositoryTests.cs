@@ -3,12 +3,42 @@ using AssetShareLib;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Options;
+using MongoDB.Driver;
 
 namespace AssetShareLib.Tests
 {
     [TestClass]
     public class UserRepositoryTests
     {
+        private UserRepository _repo = null!;
+        private MongoDbContext _context = null!;
+
+        // >>>> Sæt din (gerne test-) connection string her <<<<
+        private const string TestConnectionString =
+            "mongodb+srv://tester:test123@cluster0.cvjiyiw.mongodb.net/?retryWrites=true&w=majority";
+
+        private const string TestDatabaseName = "AssetShareDb";
+
+        [TestInitialize]
+        public void Setup()
+        {
+            var settings = new MongoDbSettings
+            {
+                ConnectionString = TestConnectionString,
+                DatabaseName = TestDatabaseName
+            };
+
+            var options = Options.Create(settings);
+            _context = new MongoDbContext(options);
+
+            // Ryd Users collection før hver test
+            _context.Users.DeleteMany(FilterDefinition<User>.Empty);
+
+            _repo = new UserRepository(_context);
+        }
+
         // Helper: laver en gyldig bruger (uden Id, det sætter repo)
         private User CreateValidUser()
         {
@@ -22,109 +52,86 @@ namespace AssetShareLib.Tests
             };
         }
 
-        // ---------- Constructor / seed ----------
-
-        [TestMethod]
-        public void Constructor_SeedsOneUser()
-        {
-            // Arrange + Act
-            var repo = new UserRepository();
-
-            // Assert
-            var users = repo.GetAll();
-            Assert.AreEqual(1, users.Count, "Repository should contain exactly one seeded user");
-
-            var user = users[0];
-            Assert.AreEqual(1, user.Id);
-            Assert.AreEqual("Mads Aagaard", user.FirstName);
-            Assert.AreEqual("Larsen", user.LastName);
-            CollectionAssert.AreEquivalent(
-                new List<string> { "normal", "machineOwner" },
-                user.Roles!.ToList()
-            );
-            Assert.AreEqual("mads@mail.com", user.Email);
-        }
-
         // ---------- GetAll ----------
 
         [TestMethod]
-        public void GetAll_ReturnsReadOnlyList()
+        public async Task GetAll_EmptyAtStart_ReturnsEmptyList()
         {
-            var repo = new UserRepository();
+            var users = await _repo.GetAllAsync();
 
-            var users = repo.GetAll();
-
-            // Tjek at Count passer
-            Assert.AreEqual(1, users.Count);
-
-            // Tjek at den interne liste er read-only (ReadOnlyCollection underneden)
-            Assert.IsInstanceOfType(
-                users,
-                typeof(System.Collections.ObjectModel.ReadOnlyCollection<User>)
-            );
-        }
-
-        // ---------- GetById ----------
-
-        [TestMethod]
-        public void GetById_ExistingId_ReturnsUser()
-        {
-            var repo = new UserRepository();
-
-            var user = repo.GetById(1);
-
-            Assert.IsNotNull(user);
-            Assert.AreEqual(1, user!.Id);
-        }
-
-        [TestMethod]
-        public void GetById_NonExistingId_ReturnsNull()
-        {
-            var repo = new UserRepository();
-
-            var user = repo.GetById(999);
-
-            Assert.IsNull(user);
+            Assert.IsNotNull(users);
+            Assert.AreEqual(0, users.Count);
         }
 
         // ---------- Add ----------
 
         [TestMethod]
-        public void Add_ValidUser_AssignsIdAndStores()
+        public async Task Add_ValidUser_AssignsIdAndStores()
         {
-            var repo = new UserRepository();
-            int beforeCount = repo.GetAll().Count;
+            var before = await _repo.GetAllAsync();
+            int beforeCount = before.Count;
 
             var newUser = CreateValidUser();
 
-            var added = repo.Add(newUser);
+            var added = await _repo.AddAsync(newUser);
 
-            Assert.AreEqual(beforeCount + 1, repo.GetAll().Count);
-            Assert.AreEqual(2, added.Id); // første seed har Id = 1
-            Assert.IsTrue(repo.GetAll().Any(u => u.Id == 2 && u.Email == "test@mail.com"));
+            var after = await _repo.GetAllAsync();
+
+            Assert.AreEqual(beforeCount + 1, after.Count);
+            Assert.IsTrue(added.Id > 0);
+
+            Assert.IsTrue(after.Any(u =>
+                u.Id == added.Id &&
+                u.Email == newUser.Email &&
+                u.FirstName == newUser.FirstName &&
+                u.LastName == newUser.LastName));
         }
 
         [TestMethod]
-        public void Add_InvalidUser_ThrowsAndDoesNotChangeCount()
+        public async Task Add_InvalidUser_ThrowsAndDoesNotChangeCount()
         {
-            var repo = new UserRepository();
-            int beforeCount = repo.GetAll().Count;
+            var before = await _repo.GetAllAsync();
+            int beforeCount = before.Count;
 
             var invalidUser = CreateValidUser();
             invalidUser.Password = "short"; // ugyldig (for kort)
 
-            Assert.ThrowsException<ArgumentOutOfRangeException>(() => repo.Add(invalidUser));
+            await Assert.ThrowsExceptionAsync<ArgumentOutOfRangeException>(async () =>
+            {
+                await _repo.AddAsync(invalidUser);
+            });
 
-            int afterCount = repo.GetAll().Count;
-            Assert.AreEqual(beforeCount, afterCount, "Repository should not change when Add fails");
+            var after = await _repo.GetAllAsync();
+            Assert.AreEqual(beforeCount, after.Count);
+        }
+
+        // ---------- GetById ----------
+
+        [TestMethod]
+        public async Task GetById_ExistingId_ReturnsUser()
+        {
+            var added = await _repo.AddAsync(CreateValidUser());
+
+            var user = await _repo.GetByIdAsync(added.Id);
+
+            Assert.IsNotNull(user);
+            Assert.AreEqual(added.Id, user!.Id);
+        }
+
+        [TestMethod]
+        public async Task GetById_NonExistingId_ReturnsNull()
+        {
+            var user = await _repo.GetByIdAsync(999);
+
+            Assert.IsNull(user);
         }
 
         // ---------- Update ----------
 
         [TestMethod]
-        public void Update_ExistingUserWithValidData_UpdatesFields()
+        public async Task Update_ExistingUserWithValidData_UpdatesFields()
         {
-            var repo = new UserRepository();
+            var added = await _repo.AddAsync(CreateValidUser());
 
             var updatedUser = CreateValidUser();
             updatedUser.FirstName = "Updated Name";
@@ -133,12 +140,12 @@ namespace AssetShareLib.Tests
             updatedUser.Roles = new List<string> { "machineOwner" };
             updatedUser.Password = "NewPass#123";
 
-            var result = repo.Update(1, updatedUser);
+            var result = await _repo.UpdateAsync(added.Id, updatedUser);
 
             Assert.IsNotNull(result);
-            Assert.AreEqual(1, result!.Id);
+            Assert.AreEqual(added.Id, result!.Id);
 
-            var fromRepo = repo.GetById(1);
+            var fromRepo = await _repo.GetByIdAsync(added.Id);
             Assert.IsNotNull(fromRepo);
             Assert.AreEqual("Updated Name", fromRepo!.FirstName);
             Assert.AreEqual("UpdatedLast", fromRepo.LastName);
@@ -150,60 +157,69 @@ namespace AssetShareLib.Tests
         }
 
         [TestMethod]
-        public void Update_NonExistingUser_ReturnsNull()
+        public async Task Update_NonExistingUser_ReturnsNull()
         {
-            var repo = new UserRepository();
-
             var updatedUser = CreateValidUser();
 
-            var result = repo.Update(999, updatedUser);
+            var result = await _repo.UpdateAsync(999, updatedUser);
 
             Assert.IsNull(result);
         }
 
         [TestMethod]
-        public void Update_InvalidUser_ThrowsAndDoesNotChangeExistingUser()
+        public async Task Update_InvalidUser_ThrowsAndDoesNotChangeExistingUser()
         {
-            var repo = new UserRepository();
-            var original = repo.GetById(1)!;
-            var originalEmail = original.Email;
+            var added = await _repo.AddAsync(CreateValidUser());
+            var original = await _repo.GetByIdAsync(added.Id);
+            var originalEmail = original!.Email;
 
             var invalidUpdate = CreateValidUser();
             invalidUpdate.Email = "invalid-email"; // vil fejle email-validator
 
-            Assert.ThrowsException<ArgumentException>(() => repo.Update(1, invalidUpdate));
+            await Assert.ThrowsExceptionAsync<ArgumentException>(async () =>
+            {
+                await _repo.UpdateAsync(added.Id, invalidUpdate);
+            });
 
-            // Tjek at den eksisterende bruger IKKE er blevet ændret af et fejlet update
-            var after = repo.GetById(1)!;
-            Assert.AreEqual(originalEmail, after.Email);
+            var after = await _repo.GetByIdAsync(added.Id);
+            Assert.IsNotNull(after);
+            Assert.AreEqual(originalEmail, after!.Email);
         }
 
         // ---------- Delete ----------
 
         [TestMethod]
-        public void Delete_ExistingUser_RemovesAndReturnsUser()
+        public async Task Delete_ExistingUser_RemovesAndReturnsUser()
         {
-            var repo = new UserRepository();
-            int beforeCount = repo.GetAll().Count;
+            var added = await _repo.AddAsync(CreateValidUser());
+            var before = await _repo.GetAllAsync();
+            int beforeCount = before.Count;
 
-            var deleted = repo.Delete(1);
+            var deleted = await _repo.DeleteAsync(added.Id);
 
             Assert.IsNotNull(deleted);
-            Assert.AreEqual(1, deleted!.Id);
-            Assert.AreEqual(beforeCount - 1, repo.GetAll().Count);
-            Assert.IsNull(repo.GetById(1));
+            Assert.AreEqual(added.Id, deleted!.Id);
+
+            var after = await _repo.GetAllAsync();
+            Assert.AreEqual(beforeCount - 1, after.Count);
+
+            var fromRepo = await _repo.GetByIdAsync(added.Id);
+            Assert.IsNull(fromRepo);
         }
 
         [TestMethod]
-        public void Delete_NonExistingUser_ReturnsNullAndDoesNotChangeCount()
+        public async Task Delete_NonExistingUser_ReturnsNullAndDoesNotChangeCount()
         {
-            var repo = new UserRepository();
-            int beforeCount = repo.GetAll().Count;
+            var added = await _repo.AddAsync(CreateValidUser());
+            var before = await _repo.GetAllAsync();
+            int beforeCount = before.Count;
 
-            var deleted = repo.Delete(999);
+            var deleted = await _repo.DeleteAsync(999);
 
             Assert.IsNull(deleted);
-            Assert.AreEqual(beforeCount, repo.GetAll().Count);
+
+            var after = await _repo.GetAllAsync();
+            Assert.AreEqual(beforeCount, after.Count);
         }
     }
 }

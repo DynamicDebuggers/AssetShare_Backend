@@ -3,13 +3,43 @@ using AssetShareLib;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Options;
+using MongoDB.Driver;
 
 namespace AssetShareLib.Tests
 {
     [TestClass]
     public class ListingRepositoryTests
     {
-        // Helper: laver en "update"-listing
+        private ListingRepository _repo = null!;
+        private MongoDbContext _context = null!;
+
+        // >>>> Sæt din egen (gerne test-) connection string her <<<<
+        private const string TestConnectionString =
+            "mongodb+srv://tester:test123@cluster0.cvjiyiw.mongodb.net/?retryWrites=true&w=majority";
+
+        private const string TestDatabaseName = "AssetShareDb";
+
+        [TestInitialize]
+        public void Setup()
+        {
+            var settings = new MongoDbSettings
+            {
+                ConnectionString = TestConnectionString,
+                DatabaseName = TestDatabaseName
+            };
+
+            var options = Options.Create(settings);
+            _context = new MongoDbContext(options);
+
+            // Ryd test-data før hver test
+            _context.Listings.DeleteMany(FilterDefinition<Listing>.Empty);
+
+            _repo = new ListingRepository(_context);
+        }
+
+        // Helper til updates
         private Listing CreateListingForUpdate()
         {
             return new Listing
@@ -22,88 +52,54 @@ namespace AssetShareLib.Tests
             };
         }
 
-        // ---------- Constructor / seeding ----------
-
-        [TestMethod]
-        public void Constructor_SeedsFourListings()
+        private Listing CreateValidListing(
+            string title = "Sample Listing",
+            string description = "Sample description",
+            decimal price = 123.45m,
+            int machineId = 1,
+            int userId = 1)
         {
-            var repo = new ListingRepository();
-
-            var all = repo.GetAll();
-
-            Assert.AreEqual(4, all.Count, "Repository should seed exactly 4 listings.");
-            CollectionAssert.AreEquivalent(
-                new List<int> { 1, 2, 3, 4 },
-                all.Select(l => l.Id).ToList()
-            );
-        }
-
-        [TestMethod]
-        public void SeededListings_AreValidAccordingToListingValidation()
-        {
-            var repo = new ListingRepository();
-
-            foreach (var listing in repo.GetAll())
+            return new Listing
             {
-                listing.ValidateAll(); // hvis der kastes exception, fejler testen
-            }
+                Title = title,
+                Description = description,
+                Price = price,
+                MachineId = machineId,
+                UserId = userId
+            };
         }
 
         // ---------- GetAll ----------
 
         [TestMethod]
-        public void GetAll_ReturnsAllListings()
+        public async Task GetAll_EmptyAtStart_ReturnsEmptyList()
         {
-            var repo = new ListingRepository();
+            var all = await _repo.GetAll();
 
-            var all = repo.GetAll();
-
-            Assert.AreEqual(4, all.Count);
-        }
-
-        // ---------- GetById ----------
-
-        [TestMethod]
-        public void GetById_ExistingId_ReturnsListing()
-        {
-            var repo = new ListingRepository();
-
-            var listing = repo.GetById(1);
-
-            Assert.IsNotNull(listing);
-            Assert.AreEqual(1, listing!.Id);
-        }
-
-        [TestMethod]
-        public void GetById_NonExistingId_ReturnsNull()
-        {
-            var repo = new ListingRepository();
-
-            var listing = repo.GetById(999);
-
-            Assert.IsNull(listing);
+            Assert.AreEqual(0, all.Count);
         }
 
         // ---------- Create ----------
 
         [TestMethod]
-        public void Create_ValidListing_AssignsIdAndStores()
+        public async Task Create_ValidListing_AssignsIdAndStores()
         {
-            var repo = new ListingRepository();
-            int beforeCount = repo.GetAll().Count;
+            var before = await _repo.GetAll();
+            int beforeCount = before.Count;
 
-            var created = repo.Create(
+            var listing = CreateValidListing(
                 title: "New Listing",
                 description: "A valid new listing description.",
                 price: 123.45m,
                 machineId: 10,
-                userId: 20
-            );
+                userId: 20);
 
-            var all = repo.GetAll();
+            var created = await _repo.Create(listing);
+
+            var all = await _repo.GetAll();
 
             Assert.AreEqual(beforeCount + 1, all.Count);
-            Assert.AreEqual(5, created.Id); // 4 seedede → næste er 5
+            Assert.IsTrue(created.Id > 0);
             Assert.AreEqual("New Listing", created.Title);
             Assert.AreEqual("A valid new listing description.", created.Description);
             Assert.AreEqual(123.45m, created.Price);
@@ -111,98 +107,118 @@ namespace AssetShareLib.Tests
             Assert.AreEqual(20, created.UserId);
         }
 
-        // (Bemærk: Repositoryet kalder ikke ValidateAll, så vi tester kun simpel opførsel her)
+        // ---------- GetById ----------
+
+        [TestMethod]
+        public async Task GetById_ExistingId_ReturnsListing()
+        {
+            var created = await _repo.Create(CreateValidListing());
+
+            var listing = await _repo.GetById(created.Id);
+
+            Assert.IsNotNull(listing);
+            Assert.AreEqual(created.Id, listing!.Id);
+        }
+
+        [TestMethod]
+        public async Task GetById_NonExistingId_ReturnsNull()
+        {
+            var listing = await _repo.GetById(999);
+
+            Assert.IsNull(listing);
+        }
 
         // ---------- Update ----------
 
         [TestMethod]
-        public void Update_ExistingListingWithValidData_UpdatesFields()
+        public async Task Update_ExistingListingWithValidData_UpdatesFields()
         {
-            var repo = new ListingRepository();
-            var existingBefore = repo.GetById(2)!;
-
+            var created = await _repo.Create(CreateValidListing());
             var updated = CreateListingForUpdate();
 
-            var result = repo.Update(2, updated);
+            var result = await _repo.Update(created.Id, updated);
 
             Assert.IsNotNull(result);
-            Assert.AreEqual(2, result!.Id); // Id bevares
+            Assert.AreEqual(created.Id, result!.Id);
             Assert.AreEqual("Updated Title", result.Title);
             Assert.AreEqual("Updated description text.", result.Description);
             Assert.AreEqual(555.55m, result.Price);
             Assert.AreEqual(99, result.MachineId);
             Assert.AreEqual(99, result.UserId);
 
-            var fromRepo = repo.GetById(2)!;
-            Assert.AreSame(result, fromRepo); // samme objekt skal opdateres
+            var fromRepo = await _repo.GetById(created.Id);
+            Assert.IsNotNull(fromRepo);
+            Assert.AreEqual("Updated Title", fromRepo!.Title);
         }
 
         [TestMethod]
-        public void Update_NonExistingId_ReturnsNull()
+        public async Task Update_NonExistingId_ReturnsNull()
         {
-            var repo = new ListingRepository();
-
             var updated = CreateListingForUpdate();
 
-            var result = repo.Update(999, updated);
+            var result = await _repo.Update(999, updated);
 
             Assert.IsNull(result);
         }
 
         [TestMethod]
-        public void Update_PartialUpdate_NullOrZeroKeepsExistingValues()
+        public async Task Update_PartialUpdate_NullOrZeroKeepsExistingValues()
         {
-            var repo = new ListingRepository();
-            var original = repo.GetById(3)!;
-
-            var originalTitle = original.Title;
-            var originalDescription = original.Description;
-            var originalPrice = original.Price;
-            var originalMachineId = original.MachineId;
-            var originalUserId = original.UserId;
+            var created = await _repo.Create(CreateValidListing(
+                title: "Original Title",
+                description: "Original description",
+                price: 200m,
+                machineId: 5,
+                userId: 6));
 
             var partial = new Listing
             {
-                Title = null,              // skal beholde gammel title
-                Description = null,        // skal beholde gammel description
-                Price = 0m,                // skal beholde gammel price
-                MachineId = 0,             // skal beholde gammel machineId
-                UserId = 0                 // skal beholde gammel userId
+                Title = null,          // behold gammel title
+                Description = null,    // behold gammel description
+                Price = 0m,            // behold gammel price
+                MachineId = 0,         // behold gammel machineId
+                UserId = 0             // behold gammel userId
             };
 
-            var result = repo.Update(3, partial)!;
+            var result = await _repo.Update(created.Id, partial);
 
-            Assert.AreEqual(originalTitle, result.Title);
-            Assert.AreEqual(originalDescription, result.Description);
-            Assert.AreEqual(originalPrice, result.Price);
-            Assert.AreEqual(originalMachineId, result.MachineId);
-            Assert.AreEqual(originalUserId, result.UserId);
+            Assert.IsNotNull(result);
+            Assert.AreEqual("Original Title", result!.Title);
+            Assert.AreEqual("Original description", result.Description);
+            Assert.AreEqual(200m, result.Price);
+            Assert.AreEqual(5, result.MachineId);
+            Assert.AreEqual(6, result.UserId);
         }
 
         // ---------- Delete ----------
 
         [TestMethod]
-        public void Delete_ExistingListing_RemovesIt()
+        public async Task Delete_ExistingListing_RemovesIt()
         {
-            var repo = new ListingRepository();
-            int beforeCount = repo.GetAll().Count;
+            var created = await _repo.Create(CreateValidListing());
+            var before = await _repo.GetAll();
+            int beforeCount = before.Count;
 
-            repo.Delete(1);
+            await _repo.Delete(created.Id);
 
-            var all = repo.GetAll();
+            var all = await _repo.GetAll();
             Assert.AreEqual(beforeCount - 1, all.Count);
-            Assert.IsNull(repo.GetById(1));
+
+            var fromRepo = await _repo.GetById(created.Id);
+            Assert.IsNull(fromRepo);
         }
 
         [TestMethod]
-        public void Delete_NonExistingListing_DoesNothing()
+        public async Task Delete_NonExistingListing_DoesNothing()
         {
-            var repo = new ListingRepository();
-            int beforeCount = repo.GetAll().Count;
+            var l1 = await _repo.Create(CreateValidListing());
+            var before = await _repo.GetAll();
+            int beforeCount = before.Count;
 
-            repo.Delete(999);
+            await _repo.Delete(999);
 
-            Assert.AreEqual(beforeCount, repo.GetAll().Count);
+            var after = await _repo.GetAll();
+            Assert.AreEqual(beforeCount, after.Count);
         }
     }
 }

@@ -3,12 +3,43 @@ using AssetShareLib;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Options;
+using MongoDB.Driver;
 
 namespace AssetShareLib.Tests
 {
     [TestClass]
     public class BookingRepositoryTests
     {
+        private BookingRepository _repo = null!;
+        private MongoDbContext _context = null!;
+
+        // >>>> Sæt din egen test-connection string her <<<<
+        private const string TestConnectionString =
+            "mongodb+srv://tester:test123@cluster0.cvjiyiw.mongodb.net/?retryWrites=true&w=majority";
+
+        private const string TestDatabaseName = "AssetShareDb";
+
+        [TestInitialize]
+        public void Setup()
+        {
+            // Byg settings til test
+            var settings = new MongoDbSettings
+            {
+                ConnectionString = TestConnectionString,
+                DatabaseName = TestDatabaseName
+            };
+
+            var options = Options.Create(settings);
+            _context = new MongoDbContext(options);
+
+            // Ryd Bookings collection før hver test, så vi starter clean
+            _context.Bookings.DeleteMany(FilterDefinition<Booking>.Empty);
+
+            _repo = new BookingRepository(_context);
+        }
+
         // Helper: laver en gyldig booking (uden Id, det sætter repo)
         private Booking CreateValidBooking()
         {
@@ -21,73 +52,32 @@ namespace AssetShareLib.Tests
             };
         }
 
-        // ---------- Constructor / seeding ----------
-
-        [TestMethod]
-        public void Constructor_SeedsThreeBookings()
-        {
-            var repo = new BookingRepository();
-
-            var all = repo.GetAll();
-
-            Assert.AreEqual(3, all.Count, "Repository should seed exactly 3 bookings.");
-            CollectionAssert.AreEquivalent(
-                new List<int> { 1, 2, 3 },
-                all.Select(b => b.Id).ToList()
-            );
-            Assert.IsTrue(all.All(b => b.Period != DateTime.MinValue));
-        }
-
         // ---------- GetAll ----------
 
         [TestMethod]
-        public void GetAll_ReturnsListWithAllBookings()
+        public async Task GetAll_EmptyAtStart_ReturnsEmptyList()
         {
-            var repo = new BookingRepository();
+            var all = await _repo.GetAll();
 
-            var all = repo.GetAll();
-
-            Assert.AreEqual(3, all.Count);
-        }
-
-        // ---------- GetById ----------
-
-        [TestMethod]
-        public void GetById_ExistingId_ReturnsBooking()
-        {
-            var repo = new BookingRepository();
-
-            var booking = repo.GetById(1);
-
-            Assert.IsNotNull(booking);
-            Assert.AreEqual(1, booking!.Id);
-        }
-
-        [TestMethod]
-        public void GetById_NonExistingId_ReturnsNull()
-        {
-            var repo = new BookingRepository();
-
-            var booking = repo.GetById(999);
-
-            Assert.IsNull(booking);
+            Assert.AreEqual(0, all.Count, "New test DB should start with 0 bookings.");
         }
 
         // ---------- Create ----------
 
         [TestMethod]
-        public void Create_ValidBooking_AssignsIdAndStores()
+        public async Task Create_ValidBooking_AssignsIdAndStores()
         {
-            var repo = new BookingRepository();
-            int beforeCount = repo.GetAll().Count;
+            var before = await _repo.GetAll();
+            int beforeCount = before.Count;
 
             var newBooking = CreateValidBooking();
 
-            var created = repo.Create(newBooking.RentedByUserId, newBooking.BookedMachineId, newBooking.Period);
+            var created = await _repo.Create(newBooking);
 
-            var all = repo.GetAll();
+            var all = await _repo.GetAll();
             Assert.AreEqual(beforeCount + 1, all.Count);
             Assert.IsTrue(created.Id > 0);
+
             Assert.IsTrue(all.Any(b =>
                 b.Id == created.Id &&
                 b.RentedByUserId == newBooking.RentedByUserId &&
@@ -96,120 +86,158 @@ namespace AssetShareLib.Tests
         }
 
         [TestMethod]
-        public void Create_InvalidRentedByUserId_ThrowsArgumentException()
+        public async Task Create_InvalidRentedByUserId_ThrowsArgumentException_AndDoesNotStore()
         {
-            var repo = new BookingRepository();
-            int beforeCount = repo.GetAll().Count;
+            var before = await _repo.GetAll();
+            int beforeCount = before.Count;
 
-            Assert.ThrowsException<ArgumentException>(() =>
-                repo.Create(0, 1, DateTime.UtcNow.AddDays(1))
-            );
+            var booking = CreateValidBooking();
+            booking.RentedByUserId = 0; // ugyldig
 
-            Assert.AreEqual(beforeCount, repo.GetAll().Count, "Repository should not change when Create fails.");
+            await Assert.ThrowsExceptionAsync<ArgumentException>(async () =>
+            {
+                await _repo.Create(booking);
+            });
+
+            var after = await _repo.GetAll();
+            Assert.AreEqual(beforeCount, after.Count);
         }
 
         [TestMethod]
-        public void Create_InvalidBookedMachineId_ThrowsArgumentException()
+        public async Task Create_InvalidBookedMachineId_ThrowsArgumentException_AndDoesNotStore()
         {
-            var repo = new BookingRepository();
-            int beforeCount = repo.GetAll().Count;
+            var before = await _repo.GetAll();
+            int beforeCount = before.Count;
 
-            Assert.ThrowsException<ArgumentException>(() =>
-                repo.Create(1, 0, DateTime.UtcNow.AddDays(1))
-            );
+            var booking = CreateValidBooking();
+            booking.BookedMachineId = 0; // ugyldig
 
-            Assert.AreEqual(beforeCount, repo.GetAll().Count);
+            await Assert.ThrowsExceptionAsync<ArgumentException>(async () =>
+            {
+                await _repo.Create(booking);
+            });
+
+            var after = await _repo.GetAll();
+            Assert.AreEqual(beforeCount, after.Count);
         }
 
         [TestMethod]
-        public void Create_InvalidPeriod_ThrowsArgumentException()
+        public async Task Create_InvalidPeriod_ThrowsArgumentException_AndDoesNotStore()
         {
-            var repo = new BookingRepository();
-            int beforeCount = repo.GetAll().Count;
+            var before = await _repo.GetAll();
+            int beforeCount = before.Count;
 
-            Assert.ThrowsException<ArgumentException>(() =>
-                repo.Create(1, 1, DateTime.MinValue)
-            );
+            var booking = CreateValidBooking();
+            booking.Period = DateTime.MinValue; // ugyldig
 
-            Assert.AreEqual(beforeCount, repo.GetAll().Count);
+            await Assert.ThrowsExceptionAsync<ArgumentException>(async () =>
+            {
+                await _repo.Create(booking);
+            });
+
+            var after = await _repo.GetAll();
+            Assert.AreEqual(beforeCount, after.Count);
+        }
+
+        // ---------- GetById ----------
+
+        [TestMethod]
+        public async Task GetById_ExistingId_ReturnsBooking()
+        {
+            var created = await _repo.Create(CreateValidBooking());
+
+            var booking = await _repo.GetById(created.Id);
+
+            Assert.IsNotNull(booking);
+            Assert.AreEqual(created.Id, booking!.Id);
+        }
+
+        [TestMethod]
+        public async Task GetById_NonExistingId_ReturnsNull()
+        {
+            var booking = await _repo.GetById(999);
+
+            Assert.IsNull(booking);
         }
 
         // ---------- Update ----------
 
         [TestMethod]
-        public void Update_ExistingBookingWithValidData_UpdatesFields()
+        public async Task Update_ExistingBookingWithValidData_UpdatesFields()
         {
-            var repo = new BookingRepository();
-            var existing = repo.GetById(1)!;
+            var created = await _repo.Create(CreateValidBooking());
 
-            var updated = new Booking
+            var updatedValues = new Booking
             {
-                // Id ignoreres – repo bruger id-parametret til at finde eksisterende
                 RentedByUserId = 99,
                 BookedMachineId = 88,
                 Period = DateTime.UtcNow.AddDays(10),
                 Status = true
             };
 
-            var result = repo.Update(1, updated);
+            var result = await _repo.Update(created.Id, updatedValues);
 
             Assert.IsNotNull(result);
-            Assert.AreEqual(1, result.Id);
+            Assert.AreEqual(created.Id, result.Id);
             Assert.AreEqual(99, result.RentedByUserId);
             Assert.AreEqual(88, result.BookedMachineId);
-            Assert.AreEqual(updated.Period, result.Period);
+            Assert.AreEqual(updatedValues.Period, result.Period);
             Assert.IsTrue(result.Status);
         }
 
         [TestMethod]
-        public void Update_NonExistingId_ThrowsKeyNotFoundException()
+        public async Task Update_NonExistingId_ThrowsKeyNotFoundException()
         {
-            var repo = new BookingRepository();
-
             var updated = CreateValidBooking();
 
-            Assert.ThrowsException<KeyNotFoundException>(() =>
-                repo.Update(999, updated)
-            );
+            await Assert.ThrowsExceptionAsync<KeyNotFoundException>(async () =>
+            {
+                await _repo.Update(999, updated);
+            });
         }
 
         [TestMethod]
-        public void Update_InvalidRentedByUserId_ThrowsArgumentException()
+        public async Task Update_InvalidRentedByUserId_ThrowsArgumentException()
         {
-            var repo = new BookingRepository();
+            var created = await _repo.Create(CreateValidBooking());
 
             var updated = CreateValidBooking();
-            updated.RentedByUserId = -1;
+            updated.RentedByUserId = -1; // ugyldig
 
-            Assert.ThrowsException<ArgumentException>(() =>
-                repo.Update(1, updated)
-            );
+            await Assert.ThrowsExceptionAsync<ArgumentException>(async () =>
+            {
+                await _repo.Update(created.Id, updated);
+            });
         }
 
         // ---------- Delete ----------
 
         [TestMethod]
-        public void Delete_ExistingBooking_RemovesIt()
+        public async Task Delete_ExistingBooking_RemovesIt()
         {
-            var repo = new BookingRepository();
-            int beforeCount = repo.GetAll().Count;
+            var created = await _repo.Create(CreateValidBooking());
+            var before = await _repo.GetAll();
+            int beforeCount = before.Count;
 
-            repo.Delete(1);
+            await _repo.Delete(created.Id);
 
-            var after = repo.GetAll();
+            var after = await _repo.GetAll();
             Assert.AreEqual(beforeCount - 1, after.Count);
-            Assert.IsNull(repo.GetById(1));
+            var shouldBeNull = await _repo.GetById(created.Id);
+            Assert.IsNull(shouldBeNull);
         }
 
         [TestMethod]
-        public void Delete_NonExistingBooking_DoesNotThrowOrChangeCount()
+        public async Task Delete_NonExistingBooking_DoesNotThrowOrChangeCount()
         {
-            var repo = new BookingRepository();
-            int beforeCount = repo.GetAll().Count;
+            var b1 = await _repo.Create(CreateValidBooking());
+            var before = await _repo.GetAll();
+            int beforeCount = before.Count;
 
-            repo.Delete(999);
+            await _repo.Delete(999);
 
-            Assert.AreEqual(beforeCount, repo.GetAll().Count);
+            var after = await _repo.GetAll();
+            Assert.AreEqual(beforeCount, after.Count);
         }
     }
 }
