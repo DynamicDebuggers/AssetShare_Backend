@@ -1,63 +1,72 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using AssetShareLib;
+﻿using System.Collections.Generic;
+using System.Threading.Tasks;
+using MongoDB.Driver;
 
-public class MachineRepository
+namespace AssetShareLib
 {
-    private List<Machine> machines;
-
-    public MachineRepository()
+    public class MachineRepository
     {
-        machines = new List<Machine>
+        private readonly IMongoCollection<Machine> _machines;
+
+        public MachineRepository(MongoDbContext context)
         {
-            new Machine { Id = 1, UserId = 1, Title = "Excavator", Description = "Large construction excavator", Price = 1500, Location = "Hvidovre" },
-            new Machine { Id = 2, UserId = 1, Title = "Mini Loader", Description = "Compact loader for small tasks", Price = 900, Location = "Hedehusene" },
-            new Machine { Id = 3, UserId = 2, Title = "Chainsaw", Description = "Professional chainsaw", Price = 200, Location = "Roskilde" },
-            new Machine { Id = 4, UserId = 3, Title = "Tractor", Description = "Farm tractor, good condition", Price = 1200, Location = "Vejle" },
-            new Machine { Id = 5, UserId = 2, Title = "Cement Mixer", Description = "Heavy-duty cement mixer", Price = 500, Location = "Horsens" }
-        };
-    }
-
-    public List<Machine> Get()
-    {
-        return machines.Select(m => new Machine(m)).ToList();
-    }
-
-    public Machine? GetById(int id)
-    {
-        Machine? found = machines.FirstOrDefault(m => m.Id == id);
-        return found == null ? null : new Machine(found);
-    }
-
-    public Machine Add(Machine machine)
-    {
-        int newId = machines.Any() ? machines.Max(m => m.Id) + 1 : 1;
-        machine.Id = newId;
-        machines.Add(machine);
-        return machine;
-    }
-
-    public Machine? Remove(int id)
-    {
-        Machine? machineToRemove = machines.FirstOrDefault(m => m.Id == id);
-        if (machineToRemove != null)
-        {
-            machines.Remove(machineToRemove);
+            _machines = context.Machines;
         }
-        return machineToRemove;
-    }
 
-    public Machine? Update(int id, Machine values)
-    {
-        Machine? machineToUpdate = machines.FirstOrDefault(m => m.Id == id);
-        if (machineToUpdate != null)
+        // Hent alle maskiner
+        public async Task<List<Machine>> Get()
         {
-            machineToUpdate.Title = values.Title;
-            machineToUpdate.Description = values.Description;
-            machineToUpdate.Price = values.Price;
-            machineToUpdate.Location = values.Location;
+            return await _machines
+                .Find(FilterDefinition<Machine>.Empty)
+                .ToListAsync();
         }
-        return machineToUpdate;
+
+        // Hent én maskine pr. Id
+        public async Task<Machine?> GetById(int id)
+        {
+            return await _machines
+                .Find(m => m.Id == id)
+                .FirstOrDefaultAsync();
+        }
+
+        // Opret en ny maskine
+        public async Task<Machine> Add(Machine machine)
+        {
+            // Find højeste Id og læg 1 til (samme idé som din gamle Add)
+            var lastMachine = await _machines
+                .Find(FilterDefinition<Machine>.Empty)
+                .SortByDescending(m => m.Id)
+                .Limit(1)
+                .FirstOrDefaultAsync();
+
+            machine.Id = (lastMachine?.Id ?? 0) + 1;
+
+            await _machines.InsertOneAsync(machine);
+            return machine;
+        }
+
+        // Slet maskine
+        public async Task<Machine?> Remove(int id)
+        {
+            return await _machines.FindOneAndDeleteAsync(m => m.Id == id);
+        }
+
+        // Opdater maskine
+        public async Task<Machine?> Update(int id, Machine values)
+        {
+            values.Id = id; // sørg for at Id matcher
+
+            var result = await _machines.ReplaceOneAsync(
+                m => m.Id == id,
+                values
+            );
+
+            if (result.MatchedCount == 0)
+            {
+                return null;
+            }
+
+            return values;
+        }
     }
 }

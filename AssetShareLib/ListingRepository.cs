@@ -1,76 +1,79 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
+﻿using System.Collections.Generic;
+using System.Threading.Tasks;
+using MongoDB.Driver;
 
 namespace AssetShareLib
 {
-    // Very small, in-memory repository for Listing.
-    // Intentionally simple: no locking, no exceptions on missing items.
     public class ListingRepository
     {
-        private readonly List<Listing> _listings = new();
-        private int _nextId = 1;
+        private readonly IMongoCollection<Listing> _listings;
 
-        public ListingRepository()
+        public ListingRepository(MongoDbContext context)
         {
-            // Seed simple data using Create so IDs are assigned consistently.
-            Create("Sample Listing 1", "This is a sample listing description.", 99.99M, machineId: 1, userId: 1);
-            Create("Sample Listing 2", "This is another sample listing description.", 149.99M, machineId: 2, userId: 2);
-            Create("Sample Listing 3", "This is yet another sample listing description.", 199.99M, machineId: 3, userId: 3);
-            Create("Sample Listing 4", "This is a different sample listing description.", 249.99M, machineId: 4, userId: 4);
-        }
-
-        // GetById(id) : Listing? (returns null if not found)
-        public Listing? GetById(int id)
-        {
-            return _listings.FirstOrDefault(l => l.Id == id);
+            _listings = context.Listings;
         }
 
         // GetAll() : List<Listing>
-        public List<Listing> GetAll()
+        public async Task<List<Listing>> GetAll()
         {
-            return _listings;
+            return await _listings
+                .Find(FilterDefinition<Listing>.Empty)
+                .ToListAsync();
         }
 
-        // Create(title, description, price, machineId, userId) : Listing
-        public Listing Create(string title, string description, decimal price, int machineId, int userId)
+        // GetById(id) : Listing? (returns null if not found)
+        public async Task<Listing?> GetById(int id)
         {
-            var listing = new Listing
-            {
-                Id = _nextId++,
-                Title = title,
-                Description = description,
-                Price = price,
-                MachineId = machineId,
-                UserId = userId
-            };
+            return await _listings
+                .Find(l => l.Id == id)
+                .FirstOrDefaultAsync();
+        }
 
-            _listings.Add(listing);
+        // Create(...) : Listing
+        // Jeg ændrer signaturen en lille smule så du giver et Listing-objekt ind
+        public async Task<Listing> Create(Listing listing)
+        {
+            // Find højeste Id i databasen og læg 1 til
+            var lastListing = await _listings
+                .Find(FilterDefinition<Listing>.Empty)
+                .SortByDescending(l => l.Id)
+                .Limit(1)
+                .FirstOrDefaultAsync();
+
+            listing.Id = (lastListing?.Id ?? 0) + 1;
+
+            await _listings.InsertOneAsync(listing);
             return listing;
         }
 
-        // Update(id, updatedListing) : Listing? (returns updated listing or null if not found)
-        public Listing? Update(int id, Listing updatedListing)
+        // Update(id, updatedListing) : Listing? (beholder din "kun opdatér hvis værdi != 0/null"-logik)
+        public async Task<Listing?> Update(int id, Listing updatedListing)
         {
-            var existing = _listings.FirstOrDefault(l => l.Id == id);
-            if (existing == null) return null;
+            var existing = await _listings
+                .Find(l => l.Id == id)
+                .FirstOrDefaultAsync();
 
-            // Apply updates (keep Id)
+            if (existing == null)
+                return null;
+
+            // samme logik som din in-memory version
             existing.Title = updatedListing.Title ?? existing.Title;
             existing.Description = updatedListing.Description ?? existing.Description;
-            existing.Price = updatedListing.Price != 0 ? updatedListing.Price : existing.Price;
-            existing.MachineId = updatedListing.MachineId != 0 ? updatedListing.MachineId : existing.MachineId;
-            existing.UserId = updatedListing.UserId != 0 ? updatedListing.UserId : existing.UserId;
+            if (updatedListing.Price != 0)
+                existing.Price = updatedListing.Price;
+            if (updatedListing.MachineId != 0)
+                existing.MachineId = updatedListing.MachineId;
+            if (updatedListing.UserId != 0)
+                existing.UserId = updatedListing.UserId;
 
+            await _listings.ReplaceOneAsync(l => l.Id == id, existing);
             return existing;
         }
 
-        // Delete(id) : void (silently does nothing if not found)
-        public void Delete(int id)
+        // Delete(id) : void
+        public async Task Delete(int id)
         {
-            var existing = _listings.FirstOrDefault(l => l.Id == id);
-            if (existing != null) 
-                _listings.Remove(existing);
+            await _listings.DeleteOneAsync(l => l.Id == id);
         }
     }
 }

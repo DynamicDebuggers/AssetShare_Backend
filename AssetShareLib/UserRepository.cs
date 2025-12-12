@@ -1,77 +1,71 @@
-﻿namespace AssetShareLib
+﻿using MongoDB.Driver;
+
+namespace AssetShareLib
 {
     public class UserRepository
     {
-        private readonly List<User> _users = new();
-        private int _nextId = 1;
+        private readonly IMongoCollection<User> _users;
 
-
-        public UserRepository() 
+        public UserRepository(MongoDbContext context)
         {
-            User user1 = new User()
-            {
-                FirstName = "Mads Aagaard",
-                LastName = "Larsen",
-                Roles = ["normal", "machineOwner"],
-                Email = "mads@mail.com",
-                Password = "madS#123"
-            };
-
-            Add(user1);
+            _users = context.Users;
         }
 
-        public IReadOnlyList<User> GetAll()
+        public async Task<IReadOnlyList<User>> GetAllAsync()
         {
-            return _users.AsReadOnly();
+            var list = await _users
+                .Find(FilterDefinition<User>.Empty)
+                .ToListAsync();
+
+            return list.AsReadOnly();
         }
 
-        public User? GetById(int id)
+        public async Task<User?> GetByIdAsync(int id)
         {
-            User? user = _users.FirstOrDefault(w => w.Id == id);
-            if (user == null)
-            {
-                return null;
-            }
-
-            return user;
+            return await _users
+                .Find(u => u.Id == id)
+                .FirstOrDefaultAsync();
         }
 
-        public User Add(User user)
+        public async Task<User> AddAsync(User user)
         {
+            // Brug din egen validering
             user.ValidateAll();
-            user.Id = _nextId++;
-            _users.Add(user);
+
+            // Find det højeste Id i databasen og læg 1 til
+            var lastUser = await _users
+                .Find(FilterDefinition<User>.Empty)
+                .SortByDescending(u => u.Id)
+                .Limit(1)
+                .FirstOrDefaultAsync();
+
+            user.Id = (lastUser?.Id ?? 0) + 1;
+
+            await _users.InsertOneAsync(user);
             return user;
         }
 
-        public User? Update(int id, User updatedUser)
+        public async Task<User?> UpdateAsync(int id, User updatedUser)
         {
-            User? user = _users.FirstOrDefault(w => w.Id == id);
-            if (user == null)
-            {
-                return null;
-            }
             updatedUser.ValidateAll();
+            updatedUser.Id = id; // sørg for at Id matcher
 
-            user.FirstName = updatedUser.FirstName;
-            user.LastName = updatedUser.LastName;
-            user.Roles = updatedUser.Roles;
-            user.Email = updatedUser.Email;
-            user.Password = updatedUser.Password;
+            var result = await _users.ReplaceOneAsync(
+                u => u.Id == id,
+                updatedUser
+            );
 
-            return user;
-        }
-
-        public User? Delete(int id)
-        {
-            User? user = GetById(id);
-            if (user == null)
+            if (result.MatchedCount == 0)
             {
                 return null;
             }
 
-            _users.Remove(user);
-            return user;
+            return updatedUser;
+        }
+
+        public async Task<User?> DeleteAsync(int id)
+        {
+            return await _users.FindOneAndDeleteAsync(u => u.Id == id);
         }
     }
 }
