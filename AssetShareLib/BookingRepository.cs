@@ -1,77 +1,68 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Threading.Tasks;
-using MongoDB.Driver;
+using System.Linq;
 
 namespace AssetShareLib
 {
+    
     public class BookingRepository
     {
-        private readonly IMongoCollection<Booking> _bookings;
+        private readonly List<Booking> _bookings = new();
+        private int _nextId = 1;
 
-        public BookingRepository(MongoDbContext context)
+        public BookingRepository()
         {
-            _bookings = context.Bookings;
+            // seed a few simple bookings
+            Create(1, 1, DateTime.UtcNow.AddDays(1));
+            Create(2, 2, DateTime.UtcNow.AddDays(2));
+            Create(3, 3, DateTime.UtcNow.AddDays(3));
         }
 
-        // GetAll() : List<Booking>
-        public async Task<List<Booking>> GetAll()
+        public Booking? GetById(int id)
         {
-            return await _bookings
-                .Find(FilterDefinition<Booking>.Empty)
-                .ToListAsync();
+            return _bookings.FirstOrDefault(l => l.Id == id);
         }
 
-        // GetById(id) : Booking? (null hvis ikke fundet)
-        public async Task<Booking?> GetById(int id)
+        public List<Booking> GetAll()
         {
-            return await _bookings
-                .Find(b => b.Id == id)
-                .FirstOrDefaultAsync();
+            return _bookings;
         }
 
-        // Create(...) : Booking
-        // Jeg ændrer signaturen til at tage et Booking-objekt (bedre til Web API)
-        public async Task<Booking> Create(Booking booking)
+        public Booking Create(int rentedByUserId, int bookedMachineId, DateTime period)
         {
-            // brug dine egne valideringsmetoder
+            bool conflict = _bookings.Any(b => b.BookedMachineId == bookedMachineId && b.Period == period);
+            if (conflict)
+            {
+                throw new InvalidOperationException("The machine is already booked for the specified period.");
+            }
+
+            var booking = new Booking
+            {
+                Id = _nextId++,
+                RentedByUserId = rentedByUserId,
+                BookedMachineId = bookedMachineId,
+                Period = period,
+                Status = false
+            };
+
+            // use model validation helpers (keeps rules in one place)
             booking.ValidateRentedByUserIdPositive();
             booking.ValidateBookedMachineIdPositive();
             booking.ValidatePeriod();
 
-            // Find højeste Id i databasen og læg 1 til (samme idé som _nextId)
-            var lastBooking = await _bookings
-                .Find(FilterDefinition<Booking>.Empty)
-                .SortByDescending(b => b.Id)
-                .Limit(1)
-                .FirstOrDefaultAsync();
-
-            booking.Id = (lastBooking?.Id ?? 0) + 1;
-
-            await _bookings.InsertOneAsync(booking);
+            _bookings.Add(booking);
             return booking;
         }
 
-        // Update(id, updatedBooking) : Booking (eller KeyNotFoundException hvis ikke fundet)
-        public async Task<Booking> Update(int id, Booking updatedBooking)
+        public Booking Update(int id, Booking updatedBooking)
         {
-            var existing = await _bookings
-                .Find(b => b.Id == id)
-                .FirstOrDefaultAsync();
+            var existing = _bookings.FirstOrDefault(b => b.Id == id);
+            if (existing is null) throw new KeyNotFoundException($"Booking with Id {id} not found.");
 
-            if (existing is null)
-                throw new KeyNotFoundException($"Booking with Id {id} not found.");
-
-            // samme “behold gammel værdi hvis 0/default”-logik som din in-memory version
-            if (updatedBooking.RentedByUserId != 0)
-                existing.RentedByUserId = updatedBooking.RentedByUserId;
-
-            if (updatedBooking.BookedMachineId != 0)
-                existing.BookedMachineId = updatedBooking.BookedMachineId;
-
-            if (updatedBooking.Period != DateTime.MinValue)
-                existing.Period = updatedBooking.Period;
-
+            // apply updates (preserve Id)
+            existing.RentedByUserId = updatedBooking.RentedByUserId != 0 ? updatedBooking.RentedByUserId : existing.RentedByUserId;
+            existing.BookedMachineId = updatedBooking.BookedMachineId != 0 ? updatedBooking.BookedMachineId : existing.BookedMachineId;
+            existing.Period = updatedBooking.Period != DateTime.MinValue ? updatedBooking.Period : existing.Period;
             existing.Status = updatedBooking.Status;
 
             // validate updated state
@@ -79,14 +70,14 @@ namespace AssetShareLib
             existing.ValidateBookedMachineIdPositive();
             existing.ValidatePeriod();
 
-            await _bookings.ReplaceOneAsync(b => b.Id == id, existing);
             return existing;
         }
 
-        // Delete(id) : void (som før, gør ingenting hvis ikke fundet)
-        public async Task Delete(int id)
+        public void Delete(int id)
         {
-            await _bookings.DeleteOneAsync(b => b.Id == id);
+            var existing = _bookings.FirstOrDefault(b => b.Id == id);
+            if (existing != null) 
+                _bookings.Remove(existing);
         }
     }
 }

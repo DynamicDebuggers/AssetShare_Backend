@@ -1,163 +1,94 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
-using System.Threading.Tasks;
+using System.Collections.Generic;
 using AssetShareLib;
-using Microsoft.Extensions.Options;
-using MongoDB.Driver;
 
 namespace AssetShareLib.Tests
 {
     [TestClass]
     public class MachineRepositoryTests
     {
-        private MachineRepository _repo = null!;
-        private MongoDbContext _context = null!;
-
-        // >>>> Sæt din (gerne test-) connection string her <<<<
-        private const string TestConnectionString =
-            "mongodb+srv://tester:test123@cluster0.cvjiyiw.mongodb.net/?retryWrites=true&w=majority";
-
-        private const string TestDatabaseName = "AssetShareDb";
+        private MachineRepository repo;
 
         [TestInitialize]
         public void Setup()
         {
-            var settings = new MongoDbSettings
-            {
-                ConnectionString = TestConnectionString,
-                DatabaseName = TestDatabaseName
-            };
-
-            var options = Options.Create(settings);
-            _context = new MongoDbContext(options);
-
-            // Ryd Machines collection før hver test
-            _context.Machines.DeleteMany(FilterDefinition<Machine>.Empty);
-
-            _repo = new MachineRepository(_context);
-        }
-
-        private Machine CreateMachine(
-            int userId = 1,
-            string title = "Excavator",
-            string description = "Large construction excavator",
-            decimal price = 1500m,
-            string location = "Hvidovre")
-        {
-            return new Machine
-            {
-                UserId = userId,
-                Title = title,
-                Description = description,
-                Price = price,
-                Location = location
-            };
+            repo = new MachineRepository();
         }
 
         [TestMethod]
-        public void MachineRepository_CanBeCreated()
+        public void MachineRepositoryTest()
         {
-            Assert.IsNotNull(_repo);
+            Assert.IsNotNull(repo);
         }
 
         [TestMethod]
-        public async Task Get_ReturnsAllInsertedMachines()
+        public void GetTest()
         {
-            // arrange: indsæt 5 maskiner
-            await _repo.Add(CreateMachine(title: "Excavator", userId: 1));
-            await _repo.Add(CreateMachine(title: "Mini Loader", userId: 1));
-            await _repo.Add(CreateMachine(title: "Chainsaw", userId: 2));
-            await _repo.Add(CreateMachine(title: "Tractor", userId: 3));
-            await _repo.Add(CreateMachine(title: "Cement Mixer", userId: 2));
+            var machines = repo.GetAll();
 
-            // act
-            var machines = await _repo.Get();
-
-            // assert
             Assert.IsNotNull(machines);
             Assert.AreEqual(5, machines.Count);
         }
 
         [TestMethod]
-        public async Task GetById_ExistingMachine_ReturnsIt()
+        public void GetByIdTest()
         {
-            // arrange
-            var added = await _repo.Add(CreateMachine(
-                title: "Excavator",
-                description: "Large construction excavator",
-                location: "Hvidovre"));
+            var machine = repo.GetById(1);
 
-            // act
-            var machine = await _repo.GetById(added.Id);
-
-            // assert
             Assert.IsNotNull(machine);
-            Assert.AreEqual(added.Id, machine!.Id);
+            Assert.AreEqual(1, machine.Id);
             Assert.AreEqual("Excavator", machine.Title);
         }
 
         [TestMethod]
-        public async Task Add_AssignsIdAndStoresMachine()
+        public void AddTest()
         {
-            var newMachine = CreateMachine(
-                userId: 10,
-                title: "Bulldozer",
-                description: "Heavy bulldozer",
-                price: 2500m,
-                location: "Aalborg");
+            var newMachine = new Machine
+            {
+                UserId = 10,
+                Title = "Bulldozer",
+                Description = "Heavy bulldozer",
+                Price = 2500,
+                Location = "Aalborg"
+            };
 
-            var added = await _repo.Add(newMachine);
+            var added = repo.Add(newMachine);
 
             Assert.IsNotNull(added);
-            Assert.IsTrue(added.Id > 0);
+            Assert.AreEqual(6, added.Id);
             Assert.AreEqual("Bulldozer", added.Title);
-
-            var fromRepo = await _repo.GetById(added.Id);
-            Assert.IsNotNull(fromRepo);
         }
 
         [TestMethod]
-        public async Task Remove_ExistingMachine_RemovesItFromDatabase()
+        public void RemoveTest()
         {
-            var added = await _repo.Add(CreateMachine(title: "Chainsaw", userId: 2));
-
-            var removed = await _repo.Remove(added.Id);
+            var removed = repo.Remove(3);
 
             Assert.IsNotNull(removed);
-            Assert.AreEqual(added.Id, removed!.Id);
+            Assert.AreEqual(3, removed.Id);
 
-            var again = await _repo.GetById(added.Id);
+            var again = repo.GetById(3);
             Assert.IsNull(again);
         }
 
         [TestMethod]
-        public async Task Update_ExistingMachine_UpdatesFields()
+        public void UpdateTest()
         {
-            var added = await _repo.Add(CreateMachine(
-                title: "Tractor",
-                description: "Farm tractor, good condition",
-                price: 1200m,
-                location: "Vejle"));
-
             var updateValues = new Machine
             {
                 Title = "Updated Tractor",
                 Description = "Updated description",
-                Price = 999m,
-                Location = "Updated City",
-                UserId = added.UserId
+                Price = 999,
+                Location = "Updated City"
             };
 
-            var updated = await _repo.Update(added.Id, updateValues);
+            var updated = repo.Update(4, updateValues);
 
             Assert.IsNotNull(updated);
-            Assert.AreEqual("Updated Tractor", updated!.Title);
+            Assert.AreEqual("Updated Tractor", updated.Title);
             Assert.AreEqual("Updated description", updated.Description);
-            Assert.AreEqual(999m, updated.Price);
+            Assert.AreEqual(999, updated.Price);
             Assert.AreEqual("Updated City", updated.Location);
-
-            var fromRepo = await _repo.GetById(added.Id);
-            Assert.IsNotNull(fromRepo);
-            Assert.AreEqual("Updated Tractor", fromRepo!.Title);
         }
     }
 }
