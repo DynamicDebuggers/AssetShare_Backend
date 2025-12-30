@@ -11,6 +11,17 @@ namespace AssetShareLib
             _users = context.Users;
         }
 
+        private static void ValidateUserForStorage(User user)
+        {
+            user.ValidateFirstName();
+            user.ValidateLastName();
+            user.ValidateRoles();
+            user.ValidateEmail();
+
+            if (string.IsNullOrWhiteSpace(user.PasswordHash))
+                throw new ArgumentNullException(nameof(user.PasswordHash), "PasswordHash is required.");
+        }
+
         public async Task<IReadOnlyList<User>> GetAllAsync()
         {
             var list = await _users
@@ -29,10 +40,8 @@ namespace AssetShareLib
 
         public async Task<User> AddAsync(User user)
         {
-            // Brug din egen validering
-            user.ValidateAll();
+            ValidateUserForStorage(user);
 
-            // Find det højeste Id i databasen og læg 1 til
             var lastUser = await _users
                 .Find(FilterDefinition<User>.Empty)
                 .SortByDescending(u => u.Id)
@@ -45,27 +54,33 @@ namespace AssetShareLib
             return user;
         }
 
+
         public async Task<User?> UpdateAsync(int id, User updatedUser)
         {
-            updatedUser.ValidateAll();
-            updatedUser.Id = id; // sørg for at Id matcher
+            updatedUser.Id = id;
+            ValidateUserForStorage(updatedUser);
 
-            var result = await _users.ReplaceOneAsync(
-                u => u.Id == id,
-                updatedUser
-            );
+            var result = await _users.ReplaceOneAsync(u => u.Id == id, updatedUser);
 
             if (result.MatchedCount == 0)
-            {
                 return null;
-            }
 
             return updatedUser;
         }
+
 
         public async Task<User?> DeleteAsync(int id)
         {
             return await _users.FindOneAndDeleteAsync(u => u.Id == id);
         }
+
+        public async Task<User?> GetByEmailAsync(string email)
+        {
+            return await _users
+                .Find(u => u.Email == email)
+                .FirstOrDefaultAsync();
+        }
+
+
     }
 }

@@ -18,7 +18,7 @@ namespace AssetShareLib.Tests
                 LastName = "Larsen",
                 Roles = new List<string> { "normal" },
                 Email = "mads@mail.dk",
-                Password = "MadS#123"
+                PasswordHash = "MadS#123" // ✅ updated
             };
         }
 
@@ -75,7 +75,7 @@ namespace AssetShareLib.Tests
             var user = CreateValidUser();
             user.FirstName = "Mads Aagaard";
 
-            user.ValidateFirstName(); // Passer testen, hvis der ikke kastes exception
+            user.ValidateFirstName();
         }
 
         // ---------- LastName ----------
@@ -187,7 +187,7 @@ namespace AssetShareLib.Tests
         public void ValidateEmail_TooLong_ThrowsArgumentOutOfRangeException()
         {
             var user = CreateValidUser();
-            user.Email = new string('a', 101) + "@mail.dk"; // bliver >100 chars
+            user.Email = new string('a', 101) + "@mail.dk";
 
             Assert.ThrowsException<ArgumentOutOfRangeException>(() => user.ValidateEmail());
         }
@@ -205,7 +205,7 @@ namespace AssetShareLib.Tests
         public void ValidateEmail_InvalidFormat_ThrowsArgumentException()
         {
             var user = CreateValidUser();
-            user.Email = "mads.mail.dk"; // ingen @
+            user.Email = "mads.mail.dk";
 
             Assert.ThrowsException<ArgumentException>(() => user.ValidateEmail());
         }
@@ -219,91 +219,35 @@ namespace AssetShareLib.Tests
             user.ValidateEmail();
         }
 
-        // ---------- Password ----------
+        // ---------- PasswordHash (was Password) ----------
 
         [TestMethod]
-        public void ValidatePassword_Null_ThrowsArgumentNullException()
+        public void ValidatePasswordHash_Null_ThrowsArgumentNullException()
         {
             var user = CreateValidUser();
-            user.Password = null;
-
+            user.PasswordHash = null!;
             Assert.ThrowsException<ArgumentNullException>(() => user.ValidatePassword());
         }
 
         [TestMethod]
-        public void ValidatePassword_Empty_ThrowsArgumentNullException()
+        public void ValidatePasswordHash_Empty_ThrowsArgumentNullException()
         {
             var user = CreateValidUser();
-            user.Password = string.Empty;
-
+            user.PasswordHash = "";
             Assert.ThrowsException<ArgumentNullException>(() => user.ValidatePassword());
         }
 
         [TestMethod]
-        public void ValidatePassword_TooShort_ThrowsArgumentOutOfRangeException()
+        public void ValidatePasswordHash_NonEmpty_DoesNotThrow()
         {
             var user = CreateValidUser();
-            user.Password = "Ma#12"; // < 8
-
-            Assert.ThrowsException<ArgumentOutOfRangeException>(() => user.ValidatePassword());
-        }
-
-        [TestMethod]
-        public void ValidatePassword_TooLong_ThrowsArgumentOutOfRangeException()
-        {
-            var user = CreateValidUser();
-            user.Password = new string('A', 31); // > 30
-
-            Assert.ThrowsException<ArgumentOutOfRangeException>(() => user.ValidatePassword());
-        }
-
-        [TestMethod]
-        public void ValidatePassword_NoUppercase_ThrowsArgumentException()
-        {
-            var user = CreateValidUser();
-            user.Password = "mads#123"; // ingen uppercase
-
-            Assert.ThrowsException<ArgumentException>(() => user.ValidatePassword());
-        }
-
-        [TestMethod]
-        public void ValidatePassword_NoDigit_ThrowsArgumentException()
-        {
-            var user = CreateValidUser();
-            user.Password = "MadS#abc"; // ingen tal
-
-            Assert.ThrowsException<ArgumentException>(() => user.ValidatePassword());
-        }
-
-        [TestMethod]
-        public void ValidatePassword_NoSymbol_ThrowsArgumentException()
-        {
-            var user = CreateValidUser();
-            user.Password = "MadS1234"; // ingen symbol
-
-            Assert.ThrowsException<ArgumentException>(() => user.ValidatePassword());
-        }
-
-        [TestMethod]
-        public void ValidatePassword_ContainsWhitespace_ThrowsArgumentException()
-        {
-            var user = CreateValidUser();
-            user.Password = "MadS#12 3"; // space
-
-            Assert.ThrowsException<ArgumentException>(() => user.ValidatePassword());
-        }
-
-        [TestMethod]
-        public void ValidatePassword_Valid_DoesNotThrow()
-        {
-            var user = CreateValidUser();
-            user.Password = "MadS#123";
-
+            user.PasswordHash = "some-hash-value";
             user.ValidatePassword();
         }
 
-        // ---------- ValidateAll ----------
 
+        // ---------- ValidateAll ----------
+         
         [TestMethod]
         public void ValidateAll_ValidUser_DoesNotThrow()
         {
@@ -316,7 +260,7 @@ namespace AssetShareLib.Tests
         public void ValidateAll_InvalidUser_ThrowsException()
         {
             var user = CreateValidUser();
-            user.Email = "invalid"; // vil fejle i ValidateEmail
+            user.Email = "invalid";
 
             Assert.ThrowsException<ArgumentException>(() => user.ValidateAll());
         }

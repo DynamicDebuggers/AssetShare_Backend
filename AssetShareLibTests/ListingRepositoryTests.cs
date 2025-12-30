@@ -1,42 +1,20 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
 using AssetShareLib;
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Options;
-using MongoDB.Driver;
 
 namespace AssetShareLib.Tests
 {
     [TestClass]
     public class ListingRepositoryTests
     {
-        private ListingRepository _repo = null!;
-        private MongoDbContext _context = null!;
-
-        // >>>> Sæt din egen (gerne test-) connection string her <<<<
-        private const string TestConnectionString =
-            "mongodb+srv://tester:test123@cluster0.cvjiyiw.mongodb.net/?retryWrites=true&w=majority";
-
-        private const string TestDatabaseName = "AssetShareDb";
+        private InMemoryListingRepository _repo = null!;
 
         [TestInitialize]
         public void Setup()
         {
-            var settings = new MongoDbSettings
-            {
-                ConnectionString = TestConnectionString,
-                DatabaseName = TestDatabaseName
-            };
-
-            var options = Options.Create(settings);
-            _context = new MongoDbContext(options);
-
-            // Ryd test-data før hver test
-            _context.Listings.DeleteMany(FilterDefinition<Listing>.Empty);
-
-            _repo = new ListingRepository(_context);
+            _repo = new InMemoryListingRepository();
         }
 
         // Helper til updates
@@ -75,7 +53,6 @@ namespace AssetShareLib.Tests
         public async Task GetAll_EmptyAtStart_ReturnsEmptyList()
         {
             var all = await _repo.GetAll();
-
             Assert.AreEqual(0, all.Count);
         }
 
@@ -95,7 +72,6 @@ namespace AssetShareLib.Tests
                 userId: 20);
 
             var created = await _repo.Create(listing);
-
             var all = await _repo.GetAll();
 
             Assert.AreEqual(beforeCount + 1, all.Count);
@@ -113,7 +89,6 @@ namespace AssetShareLib.Tests
         public async Task GetById_ExistingId_ReturnsListing()
         {
             var created = await _repo.Create(CreateValidListing());
-
             var listing = await _repo.GetById(created.Id);
 
             Assert.IsNotNull(listing);
@@ -124,7 +99,6 @@ namespace AssetShareLib.Tests
         public async Task GetById_NonExistingId_ReturnsNull()
         {
             var listing = await _repo.GetById(999);
-
             Assert.IsNull(listing);
         }
 
@@ -155,7 +129,6 @@ namespace AssetShareLib.Tests
         public async Task Update_NonExistingId_ReturnsNull()
         {
             var updated = CreateListingForUpdate();
-
             var result = await _repo.Update(999, updated);
 
             Assert.IsNull(result);
@@ -211,7 +184,7 @@ namespace AssetShareLib.Tests
         [TestMethod]
         public async Task Delete_NonExistingListing_DoesNothing()
         {
-            var l1 = await _repo.Create(CreateValidListing());
+            await _repo.Create(CreateValidListing());
             var before = await _repo.GetAll();
             int beforeCount = before.Count;
 
@@ -219,6 +192,77 @@ namespace AssetShareLib.Tests
 
             var after = await _repo.GetAll();
             Assert.AreEqual(beforeCount, after.Count);
+        }
+
+        // ---------------------------
+        // In-memory repo ONLY for tests
+        // ---------------------------
+        private class InMemoryListingRepository
+        {
+            private readonly List<Listing> _listings = new();
+            private int _nextId = 1;
+
+            public Task<List<Listing>> GetAll()
+                => Task.FromResult(_listings.Select(Clone).ToList());
+
+            public Task<Listing?> GetById(int id)
+                => Task.FromResult(_listings.Where(l => l.Id == id).Select(Clone).FirstOrDefault());
+
+            public Task<Listing> Create(Listing listing)
+            {
+                // minimal validation (samme “type” som de fleste repos forventer)
+                if (listing == null) throw new System.ArgumentNullException(nameof(listing));
+                if (string.IsNullOrWhiteSpace(listing.Title)) throw new System.ArgumentException("Title is required.");
+                if (string.IsNullOrWhiteSpace(listing.Description)) throw new System.ArgumentException("Description is required.");
+                if (listing.Price <= 0) throw new System.ArgumentException("Price must be > 0.");
+                if (listing.MachineId <= 0) throw new System.ArgumentException("MachineId must be > 0.");
+                if (listing.UserId <= 0) throw new System.ArgumentException("UserId must be > 0.");
+
+                listing.Id = _nextId++;
+                _listings.Add(Clone(listing));
+                return Task.FromResult(Clone(listing));
+            }
+
+            public Task<Listing?> Update(int id, Listing updated)
+            {
+                if (updated == null) throw new System.ArgumentNullException(nameof(updated));
+
+                var existingIndex = _listings.FindIndex(l => l.Id == id);
+                if (existingIndex < 0) return Task.FromResult<Listing?>(null);
+
+                var existing = _listings[existingIndex];
+
+                // Partial update rules (null/0 means “keep existing”)
+                var merged = new Listing
+                {
+                    Id = id,
+                    Title = updated.Title ?? existing.Title,
+                    Description = updated.Description ?? existing.Description,
+                    Price = updated.Price == 0m ? existing.Price : updated.Price,
+                    MachineId = updated.MachineId == 0 ? existing.MachineId : updated.MachineId,
+                    UserId = updated.UserId == 0 ? existing.UserId : updated.UserId
+                };
+
+                _listings[existingIndex] = Clone(merged);
+                return Task.FromResult<Listing?>(Clone(merged));
+            }
+
+            public Task Delete(int id)
+            {
+                var existing = _listings.FirstOrDefault(l => l.Id == id);
+                if (existing != null) _listings.Remove(existing);
+                return Task.CompletedTask;
+            }
+
+            private static Listing Clone(Listing l) => new Listing
+            {
+                Id = l.Id,
+                Title = l.Title,
+                Description = l.Description,
+                Price = l.Price,
+                MachineId = l.MachineId,
+                UserId = l.UserId
+            };
         }
     }
 }

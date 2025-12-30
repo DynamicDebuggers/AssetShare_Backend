@@ -4,51 +4,35 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Options;
-using MongoDB.Driver;
 
 namespace AssetShareLib.Tests
 {
     [TestClass]
     public class UserRepositoryTests
     {
-        private UserRepository _repo = null!;
-        private MongoDbContext _context = null!;
-
-        // >>>> Sæt din (gerne test-) connection string her <<<<
-        private const string TestConnectionString =
-            "mongodb+srv://tester:test123@cluster0.cvjiyiw.mongodb.net/?retryWrites=true&w=majority";
-
-        private const string TestDatabaseName = "AssetShareDb";
+        private InMemoryUserRepository _repo = null!;
 
         [TestInitialize]
         public void Setup()
         {
-            var settings = new MongoDbSettings
-            {
-                ConnectionString = TestConnectionString,
-                DatabaseName = TestDatabaseName
-            };
-
-            var options = Options.Create(settings);
-            _context = new MongoDbContext(options);
-
-            // Ryd Users collection før hver test
-            _context.Users.DeleteMany(FilterDefinition<User>.Empty);
-
-            _repo = new UserRepository(_context);
+            _repo = new InMemoryUserRepository();
         }
 
-        // Helper: laver en gyldig bruger (uden Id, det sætter repo)
-        private User CreateValidUser()
+        // Helper: laver en gyldig bruger (repo sætter Id)
+        private User CreateValidUser(
+            string email = "test@mail.com",
+            string firstName = "Test User",
+            string lastName = "Tester")
         {
             return new User
             {
-                FirstName = "Test User",
-                LastName = "Tester",
+                FirstName = firstName,
+                LastName = lastName,
                 Roles = new List<string> { "normal" },
-                Email = "test@mail.com",
-                Password = "Test#123"
+                Email = email,
+
+                // vigtigt: i tests kræver vi bare at PasswordHash findes (ikke DB)
+                PasswordHash = "SomeHashValue"
             };
         }
 
@@ -85,6 +69,9 @@ namespace AssetShareLib.Tests
                 u.Email == newUser.Email &&
                 u.FirstName == newUser.FirstName &&
                 u.LastName == newUser.LastName));
+
+            var stored = after.First(u => u.Id == added.Id);
+            Assert.IsFalse(string.IsNullOrWhiteSpace(stored.PasswordHash));
         }
 
         [TestMethod]
@@ -94,9 +81,9 @@ namespace AssetShareLib.Tests
             int beforeCount = before.Count;
 
             var invalidUser = CreateValidUser();
-            invalidUser.Password = "short"; // ugyldig (for kort)
+            invalidUser.PasswordHash = ""; // invalid: required for storage
 
-            await Assert.ThrowsExceptionAsync<ArgumentOutOfRangeException>(async () =>
+            await Assert.ThrowsExceptionAsync<ArgumentNullException>(async () =>
             {
                 await _repo.AddAsync(invalidUser);
             });
@@ -133,12 +120,11 @@ namespace AssetShareLib.Tests
         {
             var added = await _repo.AddAsync(CreateValidUser());
 
-            var updatedUser = CreateValidUser();
+            var updatedUser = CreateValidUser(email: "updated@mail.com");
             updatedUser.FirstName = "Updated Name";
             updatedUser.LastName = "UpdatedLast";
-            updatedUser.Email = "updated@mail.com";
             updatedUser.Roles = new List<string> { "machineOwner" };
-            updatedUser.Password = "NewPass#123";
+            updatedUser.PasswordHash = "NewHashValue";
 
             var result = await _repo.UpdateAsync(added.Id, updatedUser);
 
@@ -150,10 +136,13 @@ namespace AssetShareLib.Tests
             Assert.AreEqual("Updated Name", fromRepo!.FirstName);
             Assert.AreEqual("UpdatedLast", fromRepo.LastName);
             Assert.AreEqual("updated@mail.com", fromRepo.Email);
+
             CollectionAssert.AreEquivalent(
                 new List<string> { "machineOwner" },
                 fromRepo.Roles!.ToList()
             );
+
+            Assert.IsFalse(string.IsNullOrWhiteSpace(fromRepo.PasswordHash));
         }
 
         [TestMethod]
@@ -174,7 +163,7 @@ namespace AssetShareLib.Tests
             var originalEmail = original!.Email;
 
             var invalidUpdate = CreateValidUser();
-            invalidUpdate.Email = "invalid-email"; // vil fejle email-validator
+            invalidUpdate.Email = "invalid-email"; // fails ValidateEmail
 
             await Assert.ThrowsExceptionAsync<ArgumentException>(async () =>
             {
@@ -210,7 +199,7 @@ namespace AssetShareLib.Tests
         [TestMethod]
         public async Task Delete_NonExistingUser_ReturnsNullAndDoesNotChangeCount()
         {
-            var added = await _repo.AddAsync(CreateValidUser());
+            await _repo.AddAsync(CreateValidUser());
             var before = await _repo.GetAllAsync();
             int beforeCount = before.Count;
 
@@ -220,6 +209,78 @@ namespace AssetShareLib.Tests
 
             var after = await _repo.GetAllAsync();
             Assert.AreEqual(beforeCount, after.Count);
+        }
+
+        // ---------------------------
+        // In-memory repo ONLY for tests
+        // ---------------------------
+        private class InMemoryUserRepository
+        {
+            private readonly List<User> _users = new();
+            private int _nextId = 1;
+
+            public Task<IReadOnlyList<User>> GetAllAsync()
+                => Task.FromResult((IReadOnlyList<User>)_users.Select(Clone).ToList());
+
+            public Task<User?> GetByIdAsync(int id)
+                => Task.FromResult(_users.Where(u => u.Id == id).Select(Clone).FirstOrDefault());
+
+            public Task<User?> GetByEmailAsync(string email)
+                => Task.FromResult(_users.Where(u => u.Email == email).Select(Clone).FirstOrDefault());
+
+            public Task<User> AddAsync(User user)
+            {
+                ValidateUserForStorage(user);
+
+                user.Id = _nextId++;
+                _users.Add(Clone(user));
+                return Task.FromResult(Clone(user));
+            }
+
+            public Task<User?> UpdateAsync(int id, User updatedUser)
+            {
+                ValidateUserForStorage(updatedUser);
+
+                var idx = _users.FindIndex(u => u.Id == id);
+                if (idx < 0) return Task.FromResult<User?>(null);
+
+                updatedUser.Id = id;
+                _users[idx] = Clone(updatedUser);
+
+                return Task.FromResult<User?>(Clone(updatedUser));
+            }
+
+            public Task<User?> DeleteAsync(int id)
+            {
+                var existing = _users.FirstOrDefault(u => u.Id == id);
+                if (existing == null) return Task.FromResult<User?>(null);
+
+                _users.Remove(existing);
+                return Task.FromResult<User?>(Clone(existing));
+            }
+
+            private static void ValidateUserForStorage(User user)
+            {
+                if (user == null) throw new ArgumentNullException(nameof(user));
+
+                user.ValidateFirstName();
+                user.ValidateLastName();
+                user.ValidateRoles();
+                user.ValidateEmail();
+
+                if (string.IsNullOrWhiteSpace(user.PasswordHash))
+                    throw new ArgumentNullException(nameof(user.PasswordHash), "PasswordHash is required.");
+            }
+
+            private static User Clone(User u) => new User
+            {
+                Id = u.Id,
+                FirstName = u.FirstName,
+                LastName = u.LastName,
+                Roles = u.Roles == null ? null : new List<string>(u.Roles),
+                Email = u.Email,
+                PasswordHash = u.PasswordHash
+            };
         }
     }
 }

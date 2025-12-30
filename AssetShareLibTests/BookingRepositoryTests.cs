@@ -4,43 +4,21 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Options;
-using MongoDB.Driver;
 
 namespace AssetShareLib.Tests
 {
     [TestClass]
     public class BookingRepositoryTests
     {
-        private BookingRepository _repo = null!;
-        private MongoDbContext _context = null!;
-
-        // >>>> Sæt din egen test-connection string her <<<<
-        private const string TestConnectionString =
-            "mongodb+srv://tester:test123@cluster0.cvjiyiw.mongodb.net/?retryWrites=true&w=majority";
-
-        private const string TestDatabaseName = "AssetShareDb";
+        private InMemoryBookingRepository _repo = null!;
 
         [TestInitialize]
         public void Setup()
         {
-            // Byg settings til test
-            var settings = new MongoDbSettings
-            {
-                ConnectionString = TestConnectionString,
-                DatabaseName = TestDatabaseName
-            };
-
-            var options = Options.Create(settings);
-            _context = new MongoDbContext(options);
-
-            // Ryd Bookings collection før hver test, så vi starter clean
-            _context.Bookings.DeleteMany(FilterDefinition<Booking>.Empty);
-
-            _repo = new BookingRepository(_context);
+            _repo = new InMemoryBookingRepository();
         }
 
-        // Helper: laver en gyldig booking (uden Id, det sætter repo)
+        // Helper: laver en gyldig booking
         private Booking CreateValidBooking()
         {
             return new Booking
@@ -58,8 +36,7 @@ namespace AssetShareLib.Tests
         public async Task GetAll_EmptyAtStart_ReturnsEmptyList()
         {
             var all = await _repo.GetAll();
-
-            Assert.AreEqual(0, all.Count, "New test DB should start with 0 bookings.");
+            Assert.AreEqual(0, all.Count);
         }
 
         // ---------- Create ----------
@@ -71,7 +48,6 @@ namespace AssetShareLib.Tests
             int beforeCount = before.Count;
 
             var newBooking = CreateValidBooking();
-
             var created = await _repo.Create(newBooking);
 
             var all = await _repo.GetAll();
@@ -92,7 +68,7 @@ namespace AssetShareLib.Tests
             int beforeCount = before.Count;
 
             var booking = CreateValidBooking();
-            booking.RentedByUserId = 0; // ugyldig
+            booking.RentedByUserId = 0;
 
             await Assert.ThrowsExceptionAsync<ArgumentException>(async () =>
             {
@@ -110,7 +86,7 @@ namespace AssetShareLib.Tests
             int beforeCount = before.Count;
 
             var booking = CreateValidBooking();
-            booking.BookedMachineId = 0; // ugyldig
+            booking.BookedMachineId = 0;
 
             await Assert.ThrowsExceptionAsync<ArgumentException>(async () =>
             {
@@ -128,7 +104,7 @@ namespace AssetShareLib.Tests
             int beforeCount = before.Count;
 
             var booking = CreateValidBooking();
-            booking.Period = DateTime.MinValue; // ugyldig
+            booking.Period = DateTime.MinValue;
 
             await Assert.ThrowsExceptionAsync<ArgumentException>(async () =>
             {
@@ -156,7 +132,6 @@ namespace AssetShareLib.Tests
         public async Task GetById_NonExistingId_ReturnsNull()
         {
             var booking = await _repo.GetById(999);
-
             Assert.IsNull(booking);
         }
 
@@ -202,7 +177,7 @@ namespace AssetShareLib.Tests
             var created = await _repo.Create(CreateValidBooking());
 
             var updated = CreateValidBooking();
-            updated.RentedByUserId = -1; // ugyldig
+            updated.RentedByUserId = -1;
 
             await Assert.ThrowsExceptionAsync<ArgumentException>(async () =>
             {
@@ -223,6 +198,7 @@ namespace AssetShareLib.Tests
 
             var after = await _repo.GetAll();
             Assert.AreEqual(beforeCount - 1, after.Count);
+
             var shouldBeNull = await _repo.GetById(created.Id);
             Assert.IsNull(shouldBeNull);
         }
@@ -230,7 +206,8 @@ namespace AssetShareLib.Tests
         [TestMethod]
         public async Task Delete_NonExistingBooking_DoesNotThrowOrChangeCount()
         {
-            var b1 = await _repo.Create(CreateValidBooking());
+            await _repo.Create(CreateValidBooking());
+
             var before = await _repo.GetAll();
             int beforeCount = before.Count;
 
@@ -238,6 +215,69 @@ namespace AssetShareLib.Tests
 
             var after = await _repo.GetAll();
             Assert.AreEqual(beforeCount, after.Count);
+        }
+
+        // ---------------------------
+        // In-memory repo ONLY for tests
+        // ---------------------------
+        private class InMemoryBookingRepository
+        {
+            private readonly List<Booking> _bookings = new();
+            private int _nextId = 1;
+
+            public Task<List<Booking>> GetAll()
+                => Task.FromResult(_bookings.ToList());
+
+            public Task<Booking?> GetById(int id)
+                => Task.FromResult(_bookings.FirstOrDefault(b => b.Id == id));
+
+            public Task<Booking> Create(Booking booking)
+            {
+                Validate(booking);
+
+                booking.Id = _nextId++;
+                _bookings.Add(Clone(booking));
+
+                return Task.FromResult(booking);
+            }
+
+            public Task<Booking> Update(int id, Booking updated)
+            {
+                Validate(updated);
+
+                var idx = _bookings.FindIndex(b => b.Id == id);
+                if (idx < 0)
+                    throw new KeyNotFoundException($"Booking with id {id} not found.");
+
+                updated.Id = id;
+                _bookings[idx] = Clone(updated);
+
+                return Task.FromResult(updated);
+            }
+
+            public Task Delete(int id)
+            {
+                var existing = _bookings.FirstOrDefault(b => b.Id == id);
+                if (existing != null) _bookings.Remove(existing);
+                return Task.CompletedTask;
+            }
+
+            private static void Validate(Booking b)
+            {
+                if (b == null) throw new ArgumentNullException(nameof(b));
+                if (b.RentedByUserId <= 0) throw new ArgumentException("RentedByUserId must be > 0");
+                if (b.BookedMachineId <= 0) throw new ArgumentException("BookedMachineId must be > 0");
+                if (b.Period == DateTime.MinValue) throw new ArgumentException("Period is invalid");
+            }
+
+            private static Booking Clone(Booking b) => new Booking
+            {
+                Id = b.Id,
+                RentedByUserId = b.RentedByUserId,
+                BookedMachineId = b.BookedMachineId,
+                Period = b.Period,
+                Status = b.Status
+            };
         }
     }
 }

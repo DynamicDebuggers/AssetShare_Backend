@@ -9,7 +9,7 @@ namespace AssetShareLib
         public string? LastName { get; set; }
         public List<string>? Roles { get; set; }
         public string? Email { get; set; }
-        public string? Password { get; set; }
+        public string PasswordHash { get; set; } = string.Empty;
 
 
         public void ValidateFirstName()
@@ -100,39 +100,9 @@ namespace AssetShareLib
 
         public void ValidatePassword()
         {
-            if (string.IsNullOrEmpty(Password))
+            if (string.IsNullOrWhiteSpace(PasswordHash))
             {
-                throw new ArgumentNullException(nameof(Password), "Password cannot be null or empty");
-            }
-
-            if (Password.Length < 8)
-            {
-                throw new ArgumentOutOfRangeException(nameof(Password), "Password must be at least 8 characters long");
-            }
-
-            if (Password.Length > 30)
-            {
-                throw new ArgumentOutOfRangeException(nameof(Password), "Password cannot be longer than 30 characters");
-            }
-
-            if (!Password.Any(char.IsUpper))
-            {
-                throw new ArgumentException("Password must contain at least one upper case letter", nameof(Password));
-            }
-
-            if (!Password.Any(char.IsDigit))
-            {
-                throw new ArgumentException("Password must contain at least one number", nameof(Password));
-            }
-
-            if (!Password.Any(c => !char.IsLetterOrDigit(c) && !char.IsWhiteSpace(c)))
-            {
-                throw new ArgumentException("Password must contain at least one symbol", nameof(Password));
-            }
-
-            if (Password.Any(char.IsWhiteSpace))
-            {
-                throw new ArgumentException("Password cannot contain spaces", nameof(Password));
+                throw new ArgumentNullException(nameof(PasswordHash), "PasswordHash cannot be null or empty");
             }
         }
 
