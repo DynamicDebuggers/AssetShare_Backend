@@ -18,4 +18,5 @@ public class MongoDbContext
     public IMongoCollection<Machine> Machines => _database.GetCollection<Machine>("Machines");
     public IMongoCollection<Listing> Listings => _database.GetCollection<Listing>("Listings");
     public IMongoCollection<Booking> Bookings => _database.GetCollection<Booking>("Bookings");
+    public IMongoCollection<Review> Reviews => _database.GetCollection<Review>("Reviews");
 }
