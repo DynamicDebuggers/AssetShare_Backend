@@ -1,27 +1,25 @@
-﻿using System;
-
-namespace AssetShareLib
+﻿namespace AssetShareLib
 {
-  
     public class Booking
     {
         public int Id { get; set; }
         public int RentedByUserId { get; set; }
         public int BookedMachineId { get; set; }
-        public DateTime Period { get; set; }
-        public bool Status { get; set; } = false;
 
-        public Booking()
-        {
-        }
+        public DateTime StartDate { get; set; }
+        public DateTime EndDate { get; set; }
+
+        public bool IsActive => DateTime.UtcNow <= EndDate;
+
+        public Booking() { }
 
         public Booking(Booking booking)
         {
             Id = booking.Id;
             RentedByUserId = booking.RentedByUserId;
             BookedMachineId = booking.BookedMachineId;
-            Period = booking.Period;
-            Status = booking.Status;
+            StartDate = booking.StartDate;
+            EndDate = booking.EndDate;
         }
 
         public void ValidateIdPositive()
@@ -39,9 +37,16 @@ namespace AssetShareLib
             if (BookedMachineId <= 0) throw new ArgumentException("BookedMachineId must be a positive number.");
         }
 
-        public void ValidatePeriod()
+        public void ValidateDates()
         {
-            if (Period == DateTime.MinValue) throw new ArgumentException("Period must be set.");
+            if (StartDate == DateTime.MinValue)
+                throw new ArgumentException("StartDate must be set.");
+
+            if (EndDate == DateTime.MinValue)
+                throw new ArgumentException("EndDate must be set.");
+
+            if (EndDate < StartDate)
+                throw new ArgumentException("EndDate cannot be before StartDate.");
         }
 
         public void ValidateAll()
@@ -49,12 +54,7 @@ namespace AssetShareLib
             ValidateIdPositive();
             ValidateRentedByUserIdPositive();
             ValidateBookedMachineIdPositive();
-            ValidatePeriod();
-        }
-
-        public override string ToString()
-        {
-            return $"Booking(Id={Id}, RentedByUserId={RentedByUserId}, BookedMachineId={BookedMachineId}, Period={Period:o}, Status={Status})";
+            ValidateDates();
         }
     }
 }

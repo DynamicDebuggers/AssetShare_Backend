@@ -4,7 +4,6 @@ using System.Linq;
 
 namespace AssetShareLib
 {
-    
     public class BookingRepository
     {
         private readonly List<Booking> _bookings = new();
@@ -12,15 +11,16 @@ namespace AssetShareLib
 
         public BookingRepository()
         {
-            // seed a few simple bookings
-            Create(1, 1, DateTime.UtcNow.AddDays(1));
-            Create(2, 2, DateTime.UtcNow.AddDays(2));
-            Create(3, 3, DateTime.UtcNow.AddDays(3));
+            // Seed: bookinger på 1 dag (fremtidige bookinger tæller som "aktive")
+            var now = DateTime.UtcNow;
+            Create(1, 1, now.AddDays(1), now.AddDays(2));
+            Create(2, 2, now.AddDays(2), now.AddDays(3));
+            Create(3, 3, now.AddDays(3), now.AddDays(4));
         }
 
         public Booking? GetById(int id)
         {
-            return _bookings.FirstOrDefault(l => l.Id == id);
+            return _bookings.FirstOrDefault(b => b.Id == id);
         }
 
         public List<Booking> GetAll()
@@ -28,27 +28,33 @@ namespace AssetShareLib
             return _bookings;
         }
 
-        public Booking Create(int rentedByUserId, int bookedMachineId, DateTime period)
+        // Overlap-regel: [start, end) (end er eksklusiv)
+        // => hvis A slutter præcis når B starter, er det OK (ingen konflikt).
+        private static bool Overlaps(DateTime startA, DateTime endA, DateTime startB, DateTime endB)
+            => startA < endB && startB < endA;
+
+        public Booking Create(int rentedByUserId, int bookedMachineId, DateTime startDate, DateTime endDate)
         {
-            bool conflict = _bookings.Any(b => b.BookedMachineId == bookedMachineId && b.Period == period);
+            // tjek overlap på samme maskine
+            bool conflict = _bookings.Any(b =>
+                b.BookedMachineId == bookedMachineId &&
+                Overlaps(startDate, endDate, b.StartDate, b.EndDate));
+
             if (conflict)
-            {
                 throw new InvalidOperationException("The machine is already booked for the specified period.");
-            }
 
             var booking = new Booking
             {
                 Id = _nextId++,
                 RentedByUserId = rentedByUserId,
                 BookedMachineId = bookedMachineId,
-                Period = period,
-                Status = false
+                StartDate = startDate,
+                EndDate = endDate
             };
 
-            // use model validation helpers (keeps rules in one place)
             booking.ValidateRentedByUserIdPositive();
             booking.ValidateBookedMachineIdPositive();
-            booking.ValidatePeriod();
+            booking.ValidateDates();
 
             _bookings.Add(booking);
             return booking;
@@ -57,18 +63,45 @@ namespace AssetShareLib
         public Booking Update(int id, Booking updatedBooking)
         {
             var existing = _bookings.FirstOrDefault(b => b.Id == id);
-            if (existing is null) throw new KeyNotFoundException($"Booking with Id {id} not found.");
+            if (existing is null)
+                throw new KeyNotFoundException($"Booking with Id {id} not found.");
 
-            // apply updates (preserve Id)
-            existing.RentedByUserId = updatedBooking.RentedByUserId != 0 ? updatedBooking.RentedByUserId : existing.RentedByUserId;
-            existing.BookedMachineId = updatedBooking.BookedMachineId != 0 ? updatedBooking.BookedMachineId : existing.BookedMachineId;
-            existing.Period = updatedBooking.Period != DateTime.MinValue ? updatedBooking.Period : existing.Period;
-            existing.Status = updatedBooking.Status;
+            // beregn nye værdier (så vi kan konflikttjekke før vi gemmer)
+            int newRentedByUserId = updatedBooking.RentedByUserId != 0
+                ? updatedBooking.RentedByUserId
+                : existing.RentedByUserId;
 
-            // validate updated state
+            int newBookedMachineId = updatedBooking.BookedMachineId != 0
+                ? updatedBooking.BookedMachineId
+                : existing.BookedMachineId;
+
+            DateTime newStartDate = updatedBooking.StartDate != DateTime.MinValue
+                ? updatedBooking.StartDate
+                : existing.StartDate;
+
+            DateTime newEndDate = updatedBooking.EndDate != DateTime.MinValue
+                ? updatedBooking.EndDate
+                : existing.EndDate;
+
+            // tjek overlap (ekskluder booking'en selv)
+            bool conflict = _bookings.Any(b =>
+                b.Id != id &&
+                b.BookedMachineId == newBookedMachineId &&
+                Overlaps(newStartDate, newEndDate, b.StartDate, b.EndDate));
+
+            if (conflict)
+                throw new InvalidOperationException("The machine is already booked for the specified period.");
+
+            // apply
+            existing.RentedByUserId = newRentedByUserId;
+            existing.BookedMachineId = newBookedMachineId;
+            existing.StartDate = newStartDate;
+            existing.EndDate = newEndDate;
+
+            // validate
             existing.ValidateRentedByUserIdPositive();
             existing.ValidateBookedMachineIdPositive();
-            existing.ValidatePeriod();
+            existing.ValidateDates();
 
             return existing;
         }
@@ -76,7 +109,7 @@ namespace AssetShareLib
         public void Delete(int id)
         {
             var existing = _bookings.FirstOrDefault(b => b.Id == id);
-            if (existing != null) 
+            if (existing != null)
                 _bookings.Remove(existing);
         }
     }

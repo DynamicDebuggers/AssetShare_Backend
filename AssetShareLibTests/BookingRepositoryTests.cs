@@ -21,12 +21,15 @@ namespace AssetShareLib.Tests
         // Helper: laver en gyldig booking
         private Booking CreateValidBooking()
         {
+            var start = DateTime.UtcNow.AddDays(5);
+            var end = start.AddDays(1);
+
             return new Booking
             {
                 RentedByUserId = 10,
                 BookedMachineId = 20,
-                Period = DateTime.UtcNow.AddDays(5),
-                Status = false
+                StartDate = start,
+                EndDate = end
             };
         }
 
@@ -58,7 +61,8 @@ namespace AssetShareLib.Tests
                 b.Id == created.Id &&
                 b.RentedByUserId == newBooking.RentedByUserId &&
                 b.BookedMachineId == newBooking.BookedMachineId &&
-                b.Period == newBooking.Period));
+                b.StartDate == newBooking.StartDate &&
+                b.EndDate == newBooking.EndDate));
         }
 
         [TestMethod]
@@ -98,13 +102,13 @@ namespace AssetShareLib.Tests
         }
 
         [TestMethod]
-        public async Task Create_InvalidPeriod_ThrowsArgumentException_AndDoesNotStore()
+        public async Task Create_InvalidStartDate_ThrowsArgumentException_AndDoesNotStore()
         {
             var before = await _repo.GetAll();
             int beforeCount = before.Count;
 
             var booking = CreateValidBooking();
-            booking.Period = DateTime.MinValue;
+            booking.StartDate = DateTime.MinValue;
 
             await Assert.ThrowsExceptionAsync<ArgumentException>(async () =>
             {
@@ -113,6 +117,140 @@ namespace AssetShareLib.Tests
 
             var after = await _repo.GetAll();
             Assert.AreEqual(beforeCount, after.Count);
+        }
+
+        [TestMethod]
+        public async Task Create_InvalidEndDate_ThrowsArgumentException_AndDoesNotStore()
+        {
+            var before = await _repo.GetAll();
+            int beforeCount = before.Count;
+
+            var booking = CreateValidBooking();
+            booking.EndDate = DateTime.MinValue;
+
+            await Assert.ThrowsExceptionAsync<ArgumentException>(async () =>
+            {
+                await _repo.Create(booking);
+            });
+
+            var after = await _repo.GetAll();
+            Assert.AreEqual(beforeCount, after.Count);
+        }
+
+        [TestMethod]
+        public async Task Create_EndDateBeforeStartDate_ThrowsArgumentException_AndDoesNotStore()
+        {
+            var before = await _repo.GetAll();
+            int beforeCount = before.Count;
+
+            var booking = CreateValidBooking();
+            booking.StartDate = new DateTime(2025, 1, 2);
+            booking.EndDate = new DateTime(2025, 1, 1);
+
+            await Assert.ThrowsExceptionAsync<ArgumentException>(async () =>
+            {
+                await _repo.Create(booking);
+            });
+
+            var after = await _repo.GetAll();
+            Assert.AreEqual(beforeCount, after.Count);
+        }
+
+        // ---------- Create (Overlap / Conflict) ----------
+
+        [TestMethod]
+        public async Task Create_SameMachine_OverlappingDates_ThrowsInvalidOperationException_AndDoesNotStore()
+        {
+            // Arrange
+            var start1 = new DateTime(2026, 1, 10, 0, 0, 0, DateTimeKind.Utc);
+            var end1 = new DateTime(2026, 1, 12, 0, 0, 0, DateTimeKind.Utc);
+
+            var start2 = new DateTime(2026, 1, 11, 0, 0, 0, DateTimeKind.Utc); // overlapper
+            var end2 = new DateTime(2026, 1, 13, 0, 0, 0, DateTimeKind.Utc);
+
+            await _repo.Create(new Booking
+            {
+                RentedByUserId = 1,
+                BookedMachineId = 99,
+                StartDate = start1,
+                EndDate = end1
+            });
+
+            var before = await _repo.GetAll();
+            int beforeCount = before.Count;
+
+            // Act + Assert
+            await Assert.ThrowsExceptionAsync<InvalidOperationException>(async () =>
+            {
+                await _repo.Create(new Booking
+                {
+                    RentedByUserId = 2,
+                    BookedMachineId = 99, // samme maskine
+                    StartDate = start2,
+                    EndDate = end2
+                });
+            });
+
+            var after = await _repo.GetAll();
+            Assert.AreEqual(beforeCount, after.Count);
+        }
+
+        [TestMethod]
+        public async Task Create_SameMachine_BackToBackDates_DoesNotThrow_StoresBoth()
+        {
+            // Arrange: [10,12) og [12,14) => ingen overlap
+            var start1 = new DateTime(2026, 1, 10, 0, 0, 0, DateTimeKind.Utc);
+            var end1 = new DateTime(2026, 1, 12, 0, 0, 0, DateTimeKind.Utc);
+
+            var start2 = end1; // back-to-back
+            var end2 = new DateTime(2026, 1, 14, 0, 0, 0, DateTimeKind.Utc);
+
+            await _repo.Create(new Booking
+            {
+                RentedByUserId = 1,
+                BookedMachineId = 77,
+                StartDate = start1,
+                EndDate = end1
+            });
+
+            // Act
+            await _repo.Create(new Booking
+            {
+                RentedByUserId = 2,
+                BookedMachineId = 77,
+                StartDate = start2,
+                EndDate = end2
+            });
+
+            // Assert
+            var all = await _repo.GetAll();
+            Assert.AreEqual(2, all.Count);
+        }
+
+        [TestMethod]
+        public async Task Create_DifferentMachine_SameDates_DoesNotThrow_StoresBoth()
+        {
+            var start = new DateTime(2026, 1, 10, 0, 0, 0, DateTimeKind.Utc);
+            var end = new DateTime(2026, 1, 12, 0, 0, 0, DateTimeKind.Utc);
+
+            await _repo.Create(new Booking
+            {
+                RentedByUserId = 1,
+                BookedMachineId = 1,
+                StartDate = start,
+                EndDate = end
+            });
+
+            await _repo.Create(new Booking
+            {
+                RentedByUserId = 2,
+                BookedMachineId = 2, // anden maskine
+                StartDate = start,
+                EndDate = end
+            });
+
+            var all = await _repo.GetAll();
+            Assert.AreEqual(2, all.Count);
         }
 
         // ---------- GetById ----------
@@ -146,8 +284,8 @@ namespace AssetShareLib.Tests
             {
                 RentedByUserId = 99,
                 BookedMachineId = 88,
-                Period = DateTime.UtcNow.AddDays(10),
-                Status = true
+                StartDate = DateTime.UtcNow.AddDays(10),
+                EndDate = DateTime.UtcNow.AddDays(12)
             };
 
             var result = await _repo.Update(created.Id, updatedValues);
@@ -156,8 +294,11 @@ namespace AssetShareLib.Tests
             Assert.AreEqual(created.Id, result.Id);
             Assert.AreEqual(99, result.RentedByUserId);
             Assert.AreEqual(88, result.BookedMachineId);
-            Assert.AreEqual(updatedValues.Period, result.Period);
-            Assert.IsTrue(result.Status);
+            Assert.AreEqual(updatedValues.StartDate, result.StartDate);
+            Assert.AreEqual(updatedValues.EndDate, result.EndDate);
+
+            // Fremtidig booking => aktiv
+            Assert.IsTrue(result.IsActive);
         }
 
         [TestMethod]
@@ -182,6 +323,39 @@ namespace AssetShareLib.Tests
             await Assert.ThrowsExceptionAsync<ArgumentException>(async () =>
             {
                 await _repo.Update(created.Id, updated);
+            });
+        }
+
+        [TestMethod]
+        public async Task Update_ToOverlappingPeriodOnSameMachine_ThrowsInvalidOperationException()
+        {
+            // Arrange
+            var b1 = await _repo.Create(new Booking
+            {
+                RentedByUserId = 1,
+                BookedMachineId = 50,
+                StartDate = new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc),
+                EndDate = new DateTime(2026, 2, 3, 0, 0, 0, DateTimeKind.Utc)
+            });
+
+            var b2 = await _repo.Create(new Booking
+            {
+                RentedByUserId = 2,
+                BookedMachineId = 50,
+                StartDate = new DateTime(2026, 2, 5, 0, 0, 0, DateTimeKind.Utc),
+                EndDate = new DateTime(2026, 2, 7, 0, 0, 0, DateTimeKind.Utc)
+            });
+
+            // Act + Assert: prøv at flytte b2 så den overlapper b1
+            await Assert.ThrowsExceptionAsync<InvalidOperationException>(async () =>
+            {
+                await _repo.Update(b2.Id, new Booking
+                {
+                    RentedByUserId = b2.RentedByUserId,
+                    BookedMachineId = b2.BookedMachineId,
+                    StartDate = new DateTime(2026, 2, 2, 0, 0, 0, DateTimeKind.Utc), // overlap
+                    EndDate = new DateTime(2026, 2, 6, 0, 0, 0, DateTimeKind.Utc)
+                });
             });
         }
 
@@ -231,9 +405,20 @@ namespace AssetShareLib.Tests
             public Task<Booking?> GetById(int id)
                 => Task.FromResult(_bookings.FirstOrDefault(b => b.Id == id));
 
+            // Overlap-regel: [start, end)
+            private static bool Overlaps(DateTime startA, DateTime endA, DateTime startB, DateTime endB)
+                => startA < endB && startB < endA;
+
             public Task<Booking> Create(Booking booking)
             {
                 Validate(booking);
+
+                bool conflict = _bookings.Any(b =>
+                    b.BookedMachineId == booking.BookedMachineId &&
+                    Overlaps(booking.StartDate, booking.EndDate, b.StartDate, b.EndDate));
+
+                if (conflict)
+                    throw new InvalidOperationException("The machine is already booked for the specified period.");
 
                 booking.Id = _nextId++;
                 _bookings.Add(Clone(booking));
@@ -248,6 +433,14 @@ namespace AssetShareLib.Tests
                 var idx = _bookings.FindIndex(b => b.Id == id);
                 if (idx < 0)
                     throw new KeyNotFoundException($"Booking with id {id} not found.");
+
+                bool conflict = _bookings.Any(b =>
+                    b.Id != id &&
+                    b.BookedMachineId == updated.BookedMachineId &&
+                    Overlaps(updated.StartDate, updated.EndDate, b.StartDate, b.EndDate));
+
+                if (conflict)
+                    throw new InvalidOperationException("The machine is already booked for the specified period.");
 
                 updated.Id = id;
                 _bookings[idx] = Clone(updated);
@@ -267,7 +460,9 @@ namespace AssetShareLib.Tests
                 if (b == null) throw new ArgumentNullException(nameof(b));
                 if (b.RentedByUserId <= 0) throw new ArgumentException("RentedByUserId must be > 0");
                 if (b.BookedMachineId <= 0) throw new ArgumentException("BookedMachineId must be > 0");
-                if (b.Period == DateTime.MinValue) throw new ArgumentException("Period is invalid");
+                if (b.StartDate == DateTime.MinValue) throw new ArgumentException("StartDate is invalid");
+                if (b.EndDate == DateTime.MinValue) throw new ArgumentException("EndDate is invalid");
+                if (b.EndDate < b.StartDate) throw new ArgumentException("EndDate cannot be before StartDate");
             }
 
             private static Booking Clone(Booking b) => new Booking
@@ -275,8 +470,8 @@ namespace AssetShareLib.Tests
                 Id = b.Id,
                 RentedByUserId = b.RentedByUserId,
                 BookedMachineId = b.BookedMachineId,
-                Period = b.Period,
-                Status = b.Status
+                StartDate = b.StartDate,
+                EndDate = b.EndDate
             };
         }
     }

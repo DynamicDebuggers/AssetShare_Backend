@@ -10,13 +10,15 @@ namespace AssetShareLib.Tests
         // Helper: laver en gyldig booking
         private Booking CreateValidBooking()
         {
+            var now = DateTime.UtcNow;
+
             return new Booking
             {
                 Id = 1,
                 RentedByUserId = 2,
                 BookedMachineId = 3,
-                Period = new DateTime(2025, 1, 1),
-                Status = false
+                StartDate = now.AddDays(1),
+                EndDate = now.AddDays(2)
             };
         }
 
@@ -107,24 +109,42 @@ namespace AssetShareLib.Tests
             Assert.ThrowsException<ArgumentException>(() => booking.ValidateBookedMachineIdPositive());
         }
 
-        // -------- ValidatePeriod --------
+        // -------- ValidateDates --------
 
         [TestMethod]
-        public void ValidatePeriod_ValidDate_DoesNotThrow()
+        public void ValidateDates_ValidDates_DoesNotThrow()
         {
             var booking = CreateValidBooking();
-            booking.Period = new DateTime(2025, 1, 1);
 
-            booking.ValidatePeriod();
+            booking.ValidateDates();
         }
 
         [TestMethod]
-        public void ValidatePeriod_MinValue_ThrowsArgumentException()
+        public void ValidateDates_StartDateMinValue_ThrowsArgumentException()
         {
             var booking = CreateValidBooking();
-            booking.Period = DateTime.MinValue;
+            booking.StartDate = DateTime.MinValue;
 
-            Assert.ThrowsException<ArgumentException>(() => booking.ValidatePeriod());
+            Assert.ThrowsException<ArgumentException>(() => booking.ValidateDates());
+        }
+
+        [TestMethod]
+        public void ValidateDates_EndDateMinValue_ThrowsArgumentException()
+        {
+            var booking = CreateValidBooking();
+            booking.EndDate = DateTime.MinValue;
+
+            Assert.ThrowsException<ArgumentException>(() => booking.ValidateDates());
+        }
+
+        [TestMethod]
+        public void ValidateDates_EndDateBeforeStartDate_ThrowsArgumentException()
+        {
+            var booking = CreateValidBooking();
+            booking.StartDate = new DateTime(2025, 1, 2);
+            booking.EndDate = new DateTime(2025, 1, 1);
+
+            Assert.ThrowsException<ArgumentException>(() => booking.ValidateDates());
         }
 
         // -------- ValidateAll --------
@@ -147,12 +167,34 @@ namespace AssetShareLib.Tests
         }
 
         [TestMethod]
-        public void ValidateAll_InvalidPeriod_ThrowsArgumentException()
+        public void ValidateAll_InvalidDates_ThrowsArgumentException()
         {
             var booking = CreateValidBooking();
-            booking.Period = DateTime.MinValue;
+            booking.StartDate = DateTime.MinValue;
 
             Assert.ThrowsException<ArgumentException>(() => booking.ValidateAll());
+        }
+
+        // -------- IsActive --------
+
+        [TestMethod]
+        public void IsActive_EndDateInFuture_ReturnsTrue()
+        {
+            var booking = CreateValidBooking();
+            booking.StartDate = DateTime.UtcNow.AddDays(1);
+            booking.EndDate = DateTime.UtcNow.AddDays(2);
+
+            Assert.IsTrue(booking.IsActive);
+        }
+
+        [TestMethod]
+        public void IsActive_EndDateInPast_ReturnsFalse()
+        {
+            var booking = CreateValidBooking();
+            booking.StartDate = DateTime.UtcNow.AddDays(-3);
+            booking.EndDate = DateTime.UtcNow.AddDays(-1);
+
+            Assert.IsFalse(booking.IsActive);
         }
 
         // -------- Copy constructor --------
@@ -161,15 +203,14 @@ namespace AssetShareLib.Tests
         public void CopyConstructor_CopiesAllFields()
         {
             var original = CreateValidBooking();
-            original.Status = true;
 
             var copy = new Booking(original);
 
             Assert.AreEqual(original.Id, copy.Id);
             Assert.AreEqual(original.RentedByUserId, copy.RentedByUserId);
             Assert.AreEqual(original.BookedMachineId, copy.BookedMachineId);
-            Assert.AreEqual(original.Period, copy.Period);
-            Assert.AreEqual(original.Status, copy.Status);
+            Assert.AreEqual(original.StartDate, copy.StartDate);
+            Assert.AreEqual(original.EndDate, copy.EndDate);
         }
     }
 }
